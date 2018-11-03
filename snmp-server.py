@@ -1,10 +1,12 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-SNMP server
+Simple SNMP server in pure Python
 """
 
 from __future__ import print_function
 
+import argparse
 import logging
 import socket
 import string
@@ -15,6 +17,8 @@ try:
     from StringIO import StringIO
 except ImportError:
     from io import StringIO
+
+__version__ = '1.0.0'
 
 PY3 = sys.version_info[0] == 3
 
@@ -252,8 +256,8 @@ def _parse_asn1_opaque(stream):
     return stream.read(length)
 
 
-def _parse_asn1(stream):
-    """Parse ASN.1
+def _parse_snmp_asn1(stream):
+    """Parse SNMP ASN.1
     After |IP|UDP| headers and "sequence" tag, SNMP protocol data units (PDUs) are the next:
     |version|community|PDU-type|request-id|error-status|error-index|variable bindings|
     """
@@ -263,6 +267,8 @@ def _parse_asn1(stream):
     while True:
         b = stream.read(1)
         if not b:
+            if pdu_index < 7:
+                raise ProtocolError('Not all SNMP protocol data units are read!')
             return result
         tag = ord(b)
         # check protocol's tags at indices
@@ -368,7 +374,7 @@ def _parse_asn1(stream):
             logger.debug('ASN1_END_OF_MIB_VIEW: %s', value)
             return (('', ''), ('', ''))
         else:
-            logger.debug('?', hex(ord(b)))
+            logger.debug('?: %s', hex(ord(b)))
         pdu_index += 1
     return result
 
@@ -399,20 +405,28 @@ def write_tv(tag, value):
 
 def main():
     """Main"""
-    host = '0.0.0.0'
-    port = 161
+    parser = argparse.ArgumentParser(description='SNMP server')
+    parser.add_argument(
+        '-p', '--port', dest='port', type=int,
+        help='port (by default 161 - requires root privileges)', default=161, required=False)
+    parser.add_argument(
+        '-v', '--version', action='version',
+        version='SNMP server v{}'.format(__version__))
+    args = parser.parse_args()
 
+    host = '0.0.0.0'
+    port = args.port
     try:
         with closing(socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind((host, port))
-            # snmp server main loop
+            # SNMP server main loop
             while True:
                 request_data, address = sock.recvfrom(4096)
                 logger.debug('Received %d bytes from %s', len(request_data), address)
 
                 request_stream = StringIO(request_data.decode('latin'))
-                request_result = _parse_asn1(request_stream)
+                request_result = _parse_snmp_asn1(request_stream)
 
                 if len(request_result) < 7:
                     raise Exception('Invalid ASN.1 parse request result length!')
