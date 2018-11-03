@@ -5,8 +5,27 @@ SNMP server
 
 Description:
 ------------
+Simple SNMP server in pure Python  
 
-Simple SNMP server in pure Python
+Usage:
+-----
+::
+
+  usage: snmp-server.py [-h] [-p PORT] [-v]
+
+  SNMP server
+
+  optional arguments:
+    -h, --help            show this help message and exit
+    -p PORT, --port PORT  port (by default 161 - requires root privileges)
+    -v, --version         show program's version number and exit
+
+**Example:**
+
+::
+
+  # ./snmp-server.py
+  # ./snmp-server.py -p 12345
 
 License:
 --------
