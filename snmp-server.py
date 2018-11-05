@@ -184,6 +184,8 @@ def _read_int_len(stream, length, signed=False):
 
 def _write_int(value):
     """Write int"""
+    if value < 0:
+        raise Exception('TODO: add support of negative values')
     if value < 0x80:
         result = chr(value)
     else:
@@ -194,6 +196,23 @@ def _write_int(value):
         values.reverse()
         result = ''.join([chr(x) for x in values])
     return bytes(result, 'latin') if PY3 else result
+
+
+def _write_asn1_length(length):
+    """Write ASN.1 length"""
+    if length > 0x7f:
+        if length <= 0xff:
+            packed_length = 0x81
+        elif length <= 0xffff:
+            packed_length = 0x82
+        elif length <= 0xffffff:
+            packed_length = 0x83
+        elif length <= 0xffffffff:
+            packed_length = 0x84
+        else:
+            raise Exception('Length is too big!')
+        return struct.pack('B', packed_length) + _write_int(length)
+    return struct.pack('B', length)
 
 
 def _parse_asn1_length(stream):
@@ -393,9 +412,7 @@ def get_next_oid(oid):
 
 def write_tlv(tag, length, value):
     """Write TLV (Tag-Length-Value)"""
-    if length > 255:
-        raise NotImplementedError('TODO')
-    return struct.pack('BB', tag, length) + value
+    return struct.pack('B', tag) + _write_asn1_length(length) + value
 
 
 def write_tv(tag, value):
@@ -470,8 +487,11 @@ def main():
                     )
                 )
                 logger.debug('Sending %d bytes of response', len(response))
+                try:
+                    sock.sendto(response, address)
+                except socket.error as ex:
+                    logger.error('Failed to send %d bytes of response: %s', len(response), ex)
                 logger.debug('==============================')
-                sock.sendto(response, address)
     except KeyboardInterrupt:
         logger.debug('Interrupted by Ctrl+C')
 
