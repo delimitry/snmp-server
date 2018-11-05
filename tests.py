@@ -97,6 +97,36 @@ class Test(unittest.TestCase):
         self.assertEqual(_write_int(0xffffffff), b'\xff\xff\xff\xff')
         self.assertEqual(_write_int(0xffffffffff), b'\xff\xff\xff\xff\xff')
 
+    def test_write_asn1_length(self):
+        """Test _parse_asn1_length"""
+        self.assertEqual(_write_asn1_length(0x00), b'\x00')
+        self.assertEqual(_write_asn1_length(0x7f), b'\x7f')
+        self.assertEqual(_write_asn1_length(0x80), b'\x81\x80')
+        self.assertEqual(_write_asn1_length(0xffff), b'\x82\xff\xff')
+        self.assertEqual(_write_asn1_length(0xffffff), b'\x83\xff\xff\xff')
+        self.assertEqual(_write_asn1_length(0xffffffff), b'\x84\xff\xff\xff\xff')
+        with self.assertRaises(Exception):
+            _write_asn1_length(0x100000000)
+
+    def test_parse_asn1_length(self):
+        """Test _parse_asn1_length"""
+        self.assertEqual(_parse_asn1_length(StringIO('\x00')), 0x00)
+        self.assertEqual(_parse_asn1_length(StringIO('\x01')), 0x01)
+        self.assertEqual(_parse_asn1_length(StringIO('\x7f')), 0x7f)
+        self.assertEqual(_parse_asn1_length(StringIO('\x81\x00')), 0x00)
+        self.assertEqual(_parse_asn1_length(StringIO('\x81\xff')), 0xff)
+        self.assertEqual(_parse_asn1_length(StringIO('\x82\x00\x00')), 0x00)
+        self.assertEqual(_parse_asn1_length(StringIO('\x82\xff\x00')), 0xff00)
+        self.assertEqual(_parse_asn1_length(StringIO('\x83\x00\x00\x00')), 0x00)
+        self.assertEqual(_parse_asn1_length(StringIO('\x83\x12\x34\x56')), 0x123456)
+        self.assertEqual(_parse_asn1_length(StringIO('\x84\x00\x00\x00\x00')), 0x00)
+        self.assertEqual(_parse_asn1_length(StringIO('\x84\x12\x34\x56\x78')), 0x12345678)
+        with self.assertRaises(Exception):
+            _parse_asn1_length(StringIO('\x80\x00'))
+        with self.assertRaises(Exception):
+            _parse_asn1_length(StringIO('\x85\x00\x00\x00\x00\x00'))
+        self.assertEqual(_parse_asn1_length(StringIO(_write_asn1_length(12345678).decode('latin'))), 12345678)
+
     def test_parse_snmp_asn1(self):
         """Test _parse_snmp_asn1"""
         with self.assertRaises(ProtocolError):
@@ -156,9 +186,12 @@ class Test(unittest.TestCase):
         """Test write_tlv"""
         self.assertEqual(write_tlv(0, 0, b''), b'\x00\x00')
         self.assertEqual(write_tlv(255, 5, b'value'), b'\xff\x05value')
-        self.assertEqual(write_tlv(255, 255, b'value'), b'\xff\xffvalue')
-        # TODO: add
-        # self.assertEqual(write_tlv(255, 256, b'value'), b'\xff\x82\x00value')
+        self.assertEqual(write_tlv(255, 0x7f, b'value'), b'\xff\x7fvalue')
+        self.assertEqual(write_tlv(255, 0x80, b'value'), b'\xff\x81\x80value')
+        self.assertEqual(write_tlv(255, 0xff, b'value'), b'\xff\x81\xffvalue')
+        self.assertEqual(write_tlv(255, 0x0100, b'value'), b'\xff\x82\x01\x00value')
+        self.assertEqual(write_tlv(255, 0xffff, b'value'), b'\xff\x82\xff\xffvalue')
+        self.assertEqual(write_tlv(255, 0xffff, b'value'), b'\xff\x82\xff\xffvalue')
 
     def test_write_tv(self):
         """Test write_tv"""
