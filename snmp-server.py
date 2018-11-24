@@ -29,11 +29,16 @@ logger.setLevel(logging.DEBUG)  # set level to logging.DEBUG for debug info
 # ASN.1 tags
 ASN1_BOOLEAN = 0x01
 ASN1_INTEGER = 0x02
+ASN1_BIT_STRING = 0x03
 ASN1_OCTET_STRING = 0x04
 ASN1_NULL = 0x05
 ASN1_OBJECT_IDENTIFIER = 0x06
+ASN1_UTF8_STRING = 0x0c
 ASN1_PRINTABLE_STRING = 0x13
+ASN1_IA5_STRING = 0x16
+ASN1_BMP_STRING = 0x1e
 ASN1_SEQUENCE = 0x30
+ASN1_SET = 0x31
 ASN1_IPADDRESS = 0x40
 ASN1_COUNTER32 = 0x41
 ASN1_GAUGE32 = 0x42
@@ -184,19 +189,21 @@ def _read_int_len(stream, length, signed=False):
 
 def _write_int(value):
     """Write int"""
+    if abs(value) > 0xffffffffffffffff:
+        raise Exception('Int value must be in [0..18446744073709551615]')
     if value < 0:
-        raise Exception('TODO: add support of negative values')
-    if value < 0x80:
-        result = chr(value)
+        if abs(value) <= 0xff:
+            result = struct.pack('>b', value)
+        elif abs(value) <= 0xffff:
+            result = struct.pack('>h', value)
+        elif abs(value) <= 0xffffffff:
+            result = struct.pack('>i', value)
+        elif abs(value) <= 0xffffffffffffffff:
+            result = struct.pack('>q', value)
     else:
-        values = []
-        while value:
-            values.append(value & 0xff)
-            value >>= 8
-        values.reverse()
-        result = ''.join([chr(x) for x in values])
-    return bytes(result, 'latin') if PY3 else result
-
+        result = struct.pack('>Q', value)
+    # strip first null bytes, if all are null - leave one
+    return result.lstrip(b'\x00') or b'\x00'
 
 def _write_asn1_length(length):
     """Write ASN.1 length"""
@@ -420,12 +427,74 @@ def write_tv(tag, value):
     return write_tlv(tag, len(value), value)
 
 
+def boolean(value):
+    return write_tlv(ASN1_BOOLEAN, 1, b'\xff' if value else b'\x00')
+
+
+def integer(value):
+    return write_tv(ASN1_INTEGER, _write_int(value))
+
+
+def octet_string(value):
+    return write_tv(ASN1_OCTET_STRING, value.encode('latin') if PY3 else value)
+
+
+def null():
+    return write_tv(ASN1_NULL, b'')
+
+
+def object_identifier(value):
+    value = oid_to_bytes(value)
+    return write_tv(ASN1_OBJECT_IDENTIFIER, value.encode('latin') if PY3 else value)
+
+
+def real(value):
+    float_value = struct.pack('>f', value)
+    return write_tv(ASN1_OPAQUE_FLOAT, float_value)
+
+
+def double(value):
+    float_value = struct.pack('>d', value)
+    return write_tv(ASN1_OPAQUE_DOUBLE, float_value)
+
+
+def ip_address(value):
+    return write_tv(ASN1_IPADDRESS, socket.inet_aton(value))
+
+
+def timeticks(value):
+    if value > 0xffffffff:
+        raise Exception('Timeticks value must be in [0..4294967295]')
+    return write_tv(ASN1_TIMETICKS, _write_int(value))
+
+
+def gauge32(value):
+    if value > 0xffffffff:
+        raise Exception('Gauge32 value must be in [0..4294967295]')
+    return write_tv(ASN1_GAUGE32, _write_int(value))
+
+
+def counter32(value):
+    if value > 0xffffffff:
+        raise Exception('Gauge32 value must be in [0..4294967295]')
+    return write_tv(ASN1_COUNTER32, _write_int(value))
+
+
+def counter64(value):
+    if value > 0xffffffffffffffff:
+        raise Exception('Gauge64 value must be in [0..18446744073709551615]')
+    return write_tv(ASN1_COUNTER64, _write_int(value))
+
+
 def main():
     """Main"""
     parser = argparse.ArgumentParser(description='SNMP server')
     parser.add_argument(
         '-p', '--port', dest='port', type=int,
         help='port (by default 161 - requires root privileges)', default=161, required=False)
+    parser.add_argument(
+        '-c', '--config', type=str,
+        help='OIDs config file', required=False)
     parser.add_argument(
         '-v', '--version', action='version',
         version='SNMP server v{}'.format(__version__))
