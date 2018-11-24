@@ -92,6 +92,7 @@ class Test(unittest.TestCase):
     def test_write_int(self):
         """Test _write_int"""
         self.assertEqual(_write_int(0x00), b'\x00')
+        self.assertEqual(_write_int(-0x01), b'\xff')
         self.assertEqual(_write_int(0x80), b'\x80')
         self.assertEqual(_write_int(0xffff), b'\xff\xff')
         self.assertEqual(_write_int(0xffffffff), b'\xff\xff\xff\xff')
@@ -197,6 +198,92 @@ class Test(unittest.TestCase):
         """Test write_tv"""
         self.assertEqual(write_tv(0, b''), b'\x00\x00')
         self.assertEqual(write_tv(255, b'value'), b'\xff\x05value')
+
+    def test_boolean(self):
+        """Test boolean"""
+        self.assertEqual(boolean(True), b'\x01\x01\xff')
+        self.assertEqual(boolean(False), b'\x01\x01\x00')
+
+    def test_integer(self):
+        """Test integer"""
+        self.assertEqual(integer(0), b'\x02\x01\x00')
+        self.assertEqual(integer(0xffff), b'\x02\x02\xff\xff')
+        self.assertEqual(integer(0x12345678), b'\x02\x04\x12\x34\x56\x78')
+
+    def test_octet_string(self):
+        """Test octet string"""
+        self.assertEqual(octet_string(''), b'\x04\x00')
+        self.assertEqual(octet_string('abc'), b'\x04\x03abc')
+        self.assertEqual(octet_string('\x00\x01\x02'), b'\x04\x03\x00\x01\x02')
+
+    def test_null(self):
+        """Test null"""
+        self.assertEqual(null(), b'\x05\x00')
+
+    def test_object_identifier(self):
+        """Test OID"""
+        self.assertEqual(object_identifier('1.3.6'), b'\x06\x02\x2b\x06')
+        self.assertEqual(object_identifier('1.3.6.7.8.9'), b'\x06\x05\x2b\x06\x07\x08\x09')
+
+    def test_real(self):
+        """Test real"""
+        self.assertEqual(real(0.0), b'\x78\x04\x00\x00\x00\x00')
+        self.assertEqual(real(float('inf')), b'\x78\x04\x7f\x80\x00\x00')
+        self.assertEqual(real(float('-inf')), b'\x78\x04\xff\x80\x00\x00')
+        self.assertEqual(real(float('nan')), b'\x78\x04\x7f\xc0\x00\x00')
+        self.assertEqual(real(float('-nan')), b'\x78\x04\xff\xc0\x00\x00')
+        self.assertEqual(real(123.456), b'\x78\x04\x42\xf6\xe9\x79')
+
+    def test_double(self):
+        """Test double"""
+        self.assertEqual(double(0.0), b'\x79\x08\x00\x00\x00\x00\x00\x00\x00\x00')
+        self.assertEqual(double(float('inf')), b'\x79\x08\x7f\xf0\x00\x00\x00\x00\x00\x00')
+        self.assertEqual(double(float('-inf')), b'\x79\x08\xff\xf0\x00\x00\x00\x00\x00\x00')
+        self.assertEqual(double(float('nan')), b'\x79\x08\x7f\xf8\x00\x00\x00\x00\x00\x00')
+        self.assertEqual(double(float('-nan')), b'\x79\x08\xff\xf8\x00\x00\x00\x00\x00\x00')
+        self.assertEqual(double(123.456), b'\x79\x08\x40\x5e\xdd\x2f\x1a\x9f\xbe\x77')
+
+    def test_ip_address(self):
+        """Test IP address"""
+        self.assertEqual(ip_address('0.0.0.0'), b'\x40\x04\x00\x00\x00\x00')
+        self.assertEqual(ip_address('127.0.0.1'), b'\x40\x04\x7f\x00\x00\x01')
+        self.assertEqual(ip_address('255.254.253.252'), b'\x40\x04\xff\xfe\xfd\xfc')
+
+    def test_timeticks(self):
+        """Test timeticks"""
+        self.assertEqual(timeticks(0), b'\x43\x01\x00')
+        self.assertEqual(timeticks(255), b'\x43\x01\xff')
+        self.assertEqual(timeticks(0xffff), b'\x43\x02\xff\xff')
+        self.assertEqual(timeticks(0xffffffff), b'\x43\x04\xff\xff\xff\xff')
+        with self.assertRaises(Exception):
+            timeticks(0xffffffffff)
+
+    def test_gauge32(self):
+        """Test gauge32"""
+        self.assertEqual(gauge32(0), b'\x42\x01\x00')
+        self.assertEqual(gauge32(255), b'\x42\x01\xff')
+        self.assertEqual(gauge32(0xffff), b'\x42\x02\xff\xff')
+        self.assertEqual(gauge32(0xffffffff), b'\x42\x04\xff\xff\xff\xff')
+        with self.assertRaises(Exception):
+            gauge32(0xffffffffff)
+
+    def test_counter32(self):
+        """Test counter32"""
+        self.assertEqual(counter32(0), b'\x41\x01\x00')
+        self.assertEqual(counter32(255), b'\x41\x01\xff')
+        self.assertEqual(counter32(0xffff), b'\x41\x02\xff\xff')
+        self.assertEqual(counter32(0xffffffff), b'\x41\x04\xff\xff\xff\xff')
+        with self.assertRaises(Exception):
+            counter32(0xffffffffff)
+
+    def test_counter64(self):
+        """Test counter64"""
+        self.assertEqual(counter64(0), b'\x46\x01\x00')
+        self.assertEqual(counter64(255), b'\x46\x01\xff')
+        self.assertEqual(counter64(0xffff), b'\x46\x02\xff\xff')
+        self.assertEqual(counter64(0xffffffff), b'\x46\x04\xff\xff\xff\xff')
+        with self.assertRaises(Exception):
+            gauge32(0xffffffffffffffffff)
 
 
 if __name__ == '__main__':
