@@ -556,7 +556,7 @@ def counter64(value):
 
 def replace_wildcards(value):
     """Replace wildcards with some possible big values"""
-    return value.replace('?', '9').replace('*', '999999999')
+    return value.replace('?', '9').replace('*', str(0xffffffff))
 
 
 def oid_cmp(oid1, oid2):
@@ -773,7 +773,7 @@ def main():
         help='OIDs config file', required=False)
     parser.add_argument(
         '-d', '--debug',
-        help='Run in debug mode', action='store_true')
+        help='run in debug mode', action='store_true')
     parser.add_argument(
         '-v', '--version', action='version',
         version='SNMP server v{}'.format(__version__))
