@@ -27,7 +27,7 @@ PY3 = sys.version_info[0] == 3
 
 logging.basicConfig(format='[%(levelname)s] %(message)s')
 logger = logging.getLogger()
-#logger.setLevel(logging.DEBUG)  # set level to logging.DEBUG for debug info
+logger.setLevel(logging.WARNING)
 
 # ASN.1 tags
 ASN1_BOOLEAN = 0x01
@@ -759,6 +759,7 @@ def snmp_server(host, port, oids):
                 sock.sendto(response, address)
             except socket.error as ex:
                 logger.error('Failed to send %d bytes of response: %s', len(response), ex)
+            logger.debug('')
 
 
 def main():
@@ -771,11 +772,21 @@ def main():
         '-c', '--config', type=str,
         help='OIDs config file', required=False)
     parser.add_argument(
+        '-d', '--debug',
+        help='Run in debug mode', action='store_true')
+    parser.add_argument(
         '-v', '--version', action='version',
         version='SNMP server v{}'.format(__version__))
+
     args = parser.parse_args()
 
-    oids = {}
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+
+    # work as an echo server if no config is passed
+    oids = {
+        '*': lambda oid: octet_string(oid),
+    }
     # read a config
     config_filename = args.config
     if config_filename:
