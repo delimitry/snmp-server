@@ -178,8 +178,8 @@ class Test(unittest.TestCase):
         """Test get_next_oid"""
         self.assertEqual(get_next_oid('1.3.6.1.1'), '1.3.6.2.1')
         self.assertEqual(get_next_oid('1.3.6.1'), '1.3.7.1')
-        self.assertEqual(get_next_oid('1.3.6'), '1.4.6')
-        self.assertEqual(get_next_oid('1.3'), '2.3')
+        self.assertEqual(get_next_oid('1.3.6'), '1.4.1')
+        self.assertEqual(get_next_oid('1.3'), '2.1')
         self.assertEqual(get_next_oid('1'), '2')
         self.assertEqual(get_next_oid('0'), '1')
 
@@ -227,21 +227,21 @@ class Test(unittest.TestCase):
 
     def test_real(self):
         """Test real"""
-        self.assertEqual(real(0.0), b'\x78\x04\x00\x00\x00\x00')
-        self.assertEqual(real(float('inf')), b'\x78\x04\x7f\x80\x00\x00')
-        self.assertEqual(real(float('-inf')), b'\x78\x04\xff\x80\x00\x00')
-        self.assertEqual(real(float('nan')), b'\x78\x04\x7f\xc0\x00\x00')
-        self.assertEqual(real(float('-nan')), b'\x78\x04\xff\xc0\x00\x00')
-        self.assertEqual(real(123.456), b'\x78\x04\x42\xf6\xe9\x79')
+        self.assertEqual(real(0.0), b'\x44\x07\x9f\x78\x04\x00\x00\x00\x00')
+        self.assertEqual(real(float('inf')), b'\x44\x07\x9f\x78\x04\x7f\x80\x00\x00')
+        self.assertEqual(real(float('-inf')), b'\x44\x07\x9f\x78\x04\xff\x80\x00\x00')
+        self.assertEqual(real(float('nan')), b'\x44\x07\x9f\x78\x04\x7f\xc0\x00\x00')
+        self.assertEqual(real(float('-nan')), b'\x44\x07\x9f\x78\x04\xff\xc0\x00\x00')
+        self.assertEqual(real(123.456), b'\x44\x07\x9f\x78\x04\x42\xf6\xe9\x79')
 
     def test_double(self):
         """Test double"""
-        self.assertEqual(double(0.0), b'\x79\x08\x00\x00\x00\x00\x00\x00\x00\x00')
-        self.assertEqual(double(float('inf')), b'\x79\x08\x7f\xf0\x00\x00\x00\x00\x00\x00')
-        self.assertEqual(double(float('-inf')), b'\x79\x08\xff\xf0\x00\x00\x00\x00\x00\x00')
-        self.assertEqual(double(float('nan')), b'\x79\x08\x7f\xf8\x00\x00\x00\x00\x00\x00')
-        self.assertEqual(double(float('-nan')), b'\x79\x08\xff\xf8\x00\x00\x00\x00\x00\x00')
-        self.assertEqual(double(123.456), b'\x79\x08\x40\x5e\xdd\x2f\x1a\x9f\xbe\x77')
+        self.assertEqual(double(0.0), b'\x44\x0b\x9f\x79\x08\x00\x00\x00\x00\x00\x00\x00\x00')
+        self.assertEqual(double(float('inf')), b'\x44\x0b\x9f\x79\x08\x7f\xf0\x00\x00\x00\x00\x00\x00')
+        self.assertEqual(double(float('-inf')), b'\x44\x0b\x9f\x79\x08\xff\xf0\x00\x00\x00\x00\x00\x00')
+        self.assertEqual(double(float('nan')), b'\x44\x0b\x9f\x79\x08\x7f\xf8\x00\x00\x00\x00\x00\x00')
+        self.assertEqual(double(float('-nan')), b'\x44\x0b\x9f\x79\x08\xff\xf8\x00\x00\x00\x00\x00\x00')
+        self.assertEqual(double(123.456), b'\x44\x0b\x9f\x79\x08\x40\x5e\xdd\x2f\x1a\x9f\xbe\x77')
 
     def test_ip_address(self):
         """Test IP address"""
