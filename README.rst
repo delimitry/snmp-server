@@ -43,7 +43,7 @@ It is possible to create a config file with values for specific OIDs.
 
 Config file - is a Python script and must have DATA dictionary with string OID keys and values.  
 
-Values can be as either ASN.1 types (e.g. :code:`integer(...)`, :code:`octet_string(...)`, etc) or any Python lambda/functions (with single argument - OID string), returning ASN.1 types.  
+Values can be either ASN.1 types (e.g. :code:`integer(...)`, :code:`octet_string(...)`, etc) or any Python lambda/functions (with single argument - OID string), returning ASN.1 type.  
 
 ::
 
