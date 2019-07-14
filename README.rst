@@ -81,6 +81,16 @@ With config file :code:`snmpwalk` command as well as :code:`snmpget` can be used
   iso.3.6.1.4.1.3.1.0 = Opaque: Float: 12345.234500
   iso.3.6.1.4.1.4.1.0 = No more variables left in this MIB View (It is past the end of the MIB tree)
 
+Also :code:`snmpset` command can be used:
+
+::
+
+  # snmpset -v2c -c public 0.0.0.0:161 .1.3.6.1.4.1.1.3.0 s "new value"
+  iso.3.6.1.4.1.1.3.0 = STRING: "new value"
+  #
+  # snmpget -v2c -c public 0.0.0.0:161 .1.3.6.1.4.1.1.3.0 
+  iso.3.6.1.4.1.1.3.0 = STRING: "new value"
+
 License:
 --------
 Released under `The MIT License`_.
