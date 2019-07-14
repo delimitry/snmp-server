@@ -54,6 +54,7 @@ ASN1_END_OF_MIB_VIEW = 0x82
 ASN1_GET_REQUEST_PDU = 0xA0
 ASN1_GET_NEXT_REQUEST_PDU = 0xA1
 ASN1_GET_RESPONSE_PDU = 0xA2
+ASN1_SET_REQUEST_PDU = 0xA3
 
 # error statuses
 ASN1_ERROR_STATUS_NO_ERROR = 0x00
@@ -69,12 +70,18 @@ ASN1_EXTENSION_ID = 0x1F  # 0b11111 (fill tag in first octet)
 ASN1_OPAQUE_TAG1 = ASN1_CONTEXT | ASN1_EXTENSION_ID  # 0x9f
 ASN1_OPAQUE_TAG2 = 0x30  # base tag value
 ASN1_APPLICATION = 0x40
-ASN1_APP_FLOAT = ASN1_APPLICATION | 8  # application-specific type 8
-ASN1_APP_DOUBLE = ASN1_APPLICATION | 9  # application-specific type 9
+ASN1_APP_FLOAT = ASN1_APPLICATION | 0x08  # application-specific type 0x08
+ASN1_APP_DOUBLE = ASN1_APPLICATION | 0x09  # application-specific type 0x09
+ASN1_APP_INT64 = ASN1_APPLICATION | 0x0A  # application-specific type 0x0A
+ASN1_APP_UINT64 = ASN1_APPLICATION | 0x0B  # application-specific type 0x0B
 ASN1_OPAQUE_FLOAT = ASN1_OPAQUE_TAG2 | ASN1_APP_FLOAT
 ASN1_OPAQUE_DOUBLE = ASN1_OPAQUE_TAG2 | ASN1_APP_DOUBLE
+ASN1_OPAQUE_INT64 = ASN1_OPAQUE_TAG2 | ASN1_APP_INT64
+ASN1_OPAQUE_UINT64 = ASN1_OPAQUE_TAG2 | ASN1_APP_UINT64
 ASN1_OPAQUE_FLOAT_BER_LEN = 7
 ASN1_OPAQUE_DOUBLE_BER_LEN = 11
+ASN1_OPAQUE_INT64_BER_LEN = 4
+ASN1_OPAQUE_UINT64_BER_LEN = 4
 
 SNMP_VERSIONS = {
     1: 'v1',
@@ -198,7 +205,7 @@ def _read_int_len(stream, length, signed=False):
             sign = value & 0x80
         result = (result << 8) + value
     if signed and sign:
-        result = twos_complement(result, 8 ** length)
+        result = twos_complement(result, 8 * length)
     return result
 
 
@@ -279,6 +286,22 @@ def _parse_asn1_opaque_double(stream):
     return 'DOUBLE', round(double_value, 5)
 
 
+def _parse_asn1_opaque_int64(stream):
+    """Parse ASN.1 opaque int64"""
+    length = _parse_asn1_length(stream)
+    value = _read_int_len(stream, length, signed=True)
+    logger.debug('ASN1_OPAQUE_INT64: %s', value)
+    return 'INT64', value
+
+
+def _parse_asn1_opaque_uint64(stream):
+    """Parse ASN.1 opaque uint64"""
+    length = _parse_asn1_length(stream)
+    value = _read_int_len(stream, length)
+    logger.debug('ASN1_OPAQUE_UINT64: %s', value)
+    return 'UINT64', value
+
+
 def _parse_asn1_opaque(stream):
     """Parse ASN.1 opaque"""
     length = _parse_asn1_length(stream)
@@ -291,7 +314,15 @@ def _parse_asn1_opaque(stream):
     elif (length == ASN1_OPAQUE_DOUBLE_BER_LEN and
           opaque_tag == ASN1_OPAQUE_TAG1 and
           opaque_type == ASN1_OPAQUE_DOUBLE):
-        return _parse_asn1_opaque_float(stream)
+        return _parse_asn1_opaque_double(stream)
+    elif (length >= ASN1_OPAQUE_INT64_BER_LEN and
+          opaque_tag == ASN1_OPAQUE_TAG1 and
+          opaque_type == ASN1_OPAQUE_INT64):
+        return _parse_asn1_opaque_int64(stream)
+    elif (length >= ASN1_OPAQUE_UINT64_BER_LEN and
+          opaque_tag == ASN1_OPAQUE_TAG1 and
+          opaque_type == ASN1_OPAQUE_UINT64):
+        return _parse_asn1_opaque_uint64(stream)
     # for simple opaque - rewind 2 bytes back (opaque tag and type)
     stream.seek(stream.tell() - 2)
     return stream.read(length)
@@ -316,7 +347,8 @@ def _parse_snmp_asn1(stream):
         if (
                 pdu_index in [1, 4, 5, 6] and tag != ASN1_INTEGER or
                 pdu_index == 2 and tag != ASN1_OCTET_STRING or
-                pdu_index == 3 and tag not in [ASN1_GET_REQUEST_PDU, ASN1_GET_NEXT_REQUEST_PDU]
+                pdu_index == 3 and tag not in [
+                    ASN1_GET_REQUEST_PDU, ASN1_GET_NEXT_REQUEST_PDU, ASN1_SET_REQUEST_PDU]
         ):
             raise ProtocolError('Invalid tag for PDU unit "{}"'.format(SNMP_PDUS[pdu_index]))
         if tag == ASN1_SEQUENCE:
@@ -359,6 +391,11 @@ def _parse_snmp_asn1(stream):
         elif tag == ASN1_GET_RESPONSE_PDU:
             length = _parse_asn1_length(stream)
             logger.debug('ASN1_GET_RESPONSE_PDU: %s', 'length = {}'.format(length))
+        elif tag == ASN1_SET_REQUEST_PDU:
+            length = _read_byte(stream)
+            logger.debug('ASN1_SET_REQUEST_PDU: %s', 'length = {}'.format(length))
+            if pdu_index == 3:  # PDU-type
+                result.append(('ASN1_SET_REQUEST_PDU', tag))
         elif tag == ASN1_TIMETICKS:
             length = _read_byte(stream)
             value = _read_int_len(stream, length)
@@ -389,7 +426,7 @@ def _parse_snmp_asn1(stream):
                 wait_oid_value = False
         elif tag == ASN1_OPAQUE:
             value = _parse_asn1_opaque(stream)
-            logger.debug('ASN1_OPAQUE: %s', value)
+            logger.debug('ASN1_OPAQUE: %r', value)
             if wait_oid_value:
                 result.append(('OPAQUE', value))
                 wait_oid_value = False
@@ -499,6 +536,27 @@ def double(value):
         'BB', ASN1_OPAQUE_TAG1, ASN1_OPAQUE_DOUBLE
     ) + _write_asn1_length(len(double_value)) + double_value
     return write_tv(ASN1_OPAQUE, opaque_type_value)
+
+
+def int64(value):
+    """Get int64"""
+    # opaque tag | len | tag1 | tag2 | len | data
+    int64_value = struct.pack('>q', value)
+    opaque_type_value = struct.pack(
+        'BB', ASN1_OPAQUE_TAG1, ASN1_OPAQUE_INT64
+    ) + _write_asn1_length(len(int64_value)) + int64_value
+    return write_tv(ASN1_OPAQUE, opaque_type_value)
+
+
+def uint64(value):
+    """Get uint64"""
+    # opaque tag | len | tag1 | tag2 | len | data
+    uint64_value = struct.pack('>Q', value)
+    opaque_type_value = struct.pack(
+        'BB', ASN1_OPAQUE_TAG1, ASN1_OPAQUE_UINT64
+    ) + _write_asn1_length(len(uint64_value)) + uint64_value
+    return write_tv(ASN1_OPAQUE, opaque_type_value)
+
 
 
 def utf8_string(value):
@@ -678,6 +736,42 @@ def handle_get_next_request(oids, oid):
     return error_status, error_index, final_oid, oid_value
 
 
+def handle_set_request(oids, oid, type_and_value):
+    """Handle SetRequest PDU"""
+    error_status = ASN1_ERROR_STATUS_NO_ERROR
+    error_index = 0
+    value_type, value = type_and_value
+    if value_type == 'INTEGER':
+        oids[oid] = integer(value)
+    elif value_type == 'STRING':
+        oids[oid] = octet_string(value)
+    elif value_type == 'OID':
+        oids[oid] = object_identifier(value)
+    elif value_type == 'TIMETICKS':
+        oids[oid] = timeticks(value)
+    elif value_type == 'IPADDRESS':
+        oids[oid] = ip_address(value)
+    elif value_type == 'COUNTER32':
+        oids[oid] = counter32(value)
+    elif value_type == 'COUNTER64':
+        oids[oid] = counter64(value)
+    elif value_type == 'GAUGE32':
+        oids[oid] = gauge32(value)
+    elif value_type == 'OPAQUE':
+        if value[0] == 'FLOAT':
+            oids[oid] = real(value[1])
+        elif value[0] == 'DOUBLE':
+            oids[oid] = double(value[1])
+        elif value[0] == 'UINT64':
+            oids[oid] = uint64(value[1])
+        elif value[0] == 'INT64':
+            oids[oid] = int64(value[1])
+        else:
+            raise Exception('Unsupported type: {} ({})'.format(value_type, repr(value)))
+    oid_value = oids[oid]
+    return error_status, error_index, oid_value
+
+
 def craft_response(version, community, request_id, error_status, error_index, oid_key, oid_value):
     """Craft SNMP response"""
     response = write_tv(
@@ -745,6 +839,11 @@ def snmp_server(host, port, oids):
                 error_status, error_index, oid_value = handle_get_request(oids, oid)
             elif pdu_type == ASN1_GET_NEXT_REQUEST_PDU:
                 error_status, error_index, oid, oid_value = handle_get_next_request(oids, oid)
+            elif pdu_type == ASN1_SET_REQUEST_PDU:
+                if len(request_result) < 8:
+                    raise Exception('Invalid ASN.1 parse request result length for SNMP set request!')
+                type_and_value = request_result[7]
+                error_status, error_index, oid_value = handle_set_request(oids, oid, type_and_value)
 
             # get oid bytes
             oid_key = oid_to_bytes(oid)
