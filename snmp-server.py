@@ -21,7 +21,7 @@ try:
 except ImportError:
     from io import StringIO
 
-__version__ = '1.0.1'
+__version__ = '1.0.2'
 
 PY3 = sys.version_info[0] == 3
 
