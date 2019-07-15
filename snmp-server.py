@@ -21,7 +21,7 @@ try:
 except ImportError:
     from io import StringIO
 
-__version__ = '1.0.2'
+__version__ = '1.0.3'
 
 PY3 = sys.version_info[0] == 3
 
@@ -379,12 +379,12 @@ def _parse_snmp_asn1(stream):
             value = stream.read(length)
             logger.debug('ASN1_PRINTABLE_STRING: %s', value)
         elif tag == ASN1_GET_REQUEST_PDU:
-            length = _read_byte(stream)
+            length = _parse_asn1_length(stream)
             logger.debug('ASN1_GET_REQUEST_PDU: %s', 'length = {}'.format(length))
             if pdu_index == 3:  # PDU-type
                 result.append(('ASN1_GET_REQUEST_PDU', tag))
         elif tag == ASN1_GET_NEXT_REQUEST_PDU:
-            length = _read_byte(stream)
+            length = _parse_asn1_length(stream)
             logger.debug('ASN1_GET_NEXT_REQUEST_PDU: %s', 'length = {}'.format(length))
             if pdu_index == 3:  # PDU-type
                 result.append(('ASN1_GET_NEXT_REQUEST_PDU', tag))
@@ -392,7 +392,7 @@ def _parse_snmp_asn1(stream):
             length = _parse_asn1_length(stream)
             logger.debug('ASN1_GET_RESPONSE_PDU: %s', 'length = {}'.format(length))
         elif tag == ASN1_SET_REQUEST_PDU:
-            length = _read_byte(stream)
+            length = _parse_asn1_length(stream)
             logger.debug('ASN1_SET_REQUEST_PDU: %s', 'length = {}'.format(length))
             if pdu_index == 3:  # PDU-type
                 result.append(('ASN1_SET_REQUEST_PDU', tag))
@@ -744,7 +744,7 @@ def handle_set_request(oids, oid, type_and_value):
     if value_type == 'INTEGER':
         oids[oid] = integer(value)
     elif value_type == 'STRING':
-        oids[oid] = octet_string(value)
+        oids[oid] = octet_string(value if PY3 else value.encode('latin'))
     elif value_type == 'OID':
         oids[oid] = object_identifier(value)
     elif value_type == 'TIMETICKS':
