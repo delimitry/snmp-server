@@ -21,7 +21,7 @@ try:
 except ImportError:
     from io import StringIO
 
-__version__ = '1.0.3'
+__version__ = '1.0.4'
 
 PY3 = sys.version_info[0] == 3
 
@@ -696,6 +696,8 @@ def handle_get_request(oids, oid):
     if not found:
         error_status = ASN1_ERROR_STATUS_NO_SUCH_NAME
         error_index = 1
+        # TODO: check this
+        oid_value = struct.pack('BB', ASN1_NO_SUCH_INSTANCE, 0)
     return error_status, error_index, oid_value
 
 
@@ -772,7 +774,7 @@ def handle_set_request(oids, oid, type_and_value):
     return error_status, error_index, oid_value
 
 
-def craft_response(version, community, request_id, error_status, error_index, oid_key, oid_value):
+def craft_response(version, community, request_id, error_status, error_index, oid_items):
     """Craft SNMP response"""
     response = write_tv(
         ASN1_SEQUENCE,
@@ -789,11 +791,16 @@ def craft_response(version, community, request_id, error_status, error_index, oi
             # add variable bindings
             write_tv(
                 ASN1_SEQUENCE,
-                # add OID and OID value
-                write_tv(
-                    ASN1_SEQUENCE,
-                    write_tv(ASN1_OBJECT_IDENTIFIER, oid_key.encode('latin') if PY3 else oid_key) +
-                    oid_value
+                b''.join(
+                    # add OID and OID value
+                    write_tv(
+                        ASN1_SEQUENCE,
+                        write_tv(
+                            ASN1_OBJECT_IDENTIFIER,
+                            oid_key.encode('latin') if PY3 else oid_key
+                        ) +
+                        oid_value
+                    ) for (oid_key, oid_value) in oid_items
                 )
             )
         )
@@ -821,38 +828,44 @@ def snmp_server(host, port, oids):
                 continue
 
             if len(request_result) < 7:
-                raise Exception('Invalid ASN.1 parse request result length!')
+                raise Exception('Invalid ASN.1 parsed request length!')
 
             # get required fields from request
             version = request_result[0][1]
             community = request_result[1][1]
             pdu_type = request_result[2][1]
             request_id = request_result[3][1]
-            oid = request_result[6][1]
 
             error_status = ASN1_ERROR_STATUS_NO_ERROR
             error_index = 0
+            oid_items = []
             oid_value = null()
 
             # handle protocol data units
             if pdu_type == ASN1_GET_REQUEST_PDU:
-                error_status, error_index, oid_value = handle_get_request(oids, oid)
+                requested_oids = request_result[6:]
+                for _, oid in requested_oids:
+                    _error_status, _error_index, oid_value = handle_get_request(oids, oid)
+                    # if oid value is a function - call it to get the value
+                    if isinstance(oid_value, types.FunctionType):
+                        oid_value = oid_value(oid)
+                    oid_items.append((oid_to_bytes(oid), oid_value))
             elif pdu_type == ASN1_GET_NEXT_REQUEST_PDU:
                 error_status, error_index, oid, oid_value = handle_get_next_request(oids, oid)
             elif pdu_type == ASN1_SET_REQUEST_PDU:
                 if len(request_result) < 8:
-                    raise Exception('Invalid ASN.1 parse request result length for SNMP set request!')
+                    raise Exception('Invalid ASN.1 parsed request length for SNMP set request!')
+                oid = request_result[6][1]
                 type_and_value = request_result[7]
                 error_status, error_index, oid_value = handle_set_request(oids, oid, type_and_value)
+                # if oid value is a function - call it to get the value
+                if isinstance(oid_value, types.FunctionType):
+                    oid_value = oid_value(oid)
+                oid_items.append((oid_to_bytes(oid), oid_value))
 
-            # get oid bytes
-            oid_key = oid_to_bytes(oid)
-            # if oid value is a function - call it to get the value
-            if isinstance(oid_value, types.FunctionType):
-                oid_value = oid_value(oid)
             # craft SNMP response
             response = craft_response(
-                version, community, request_id, error_status, error_index, oid_key, oid_value)
+                version, community, request_id, error_status, error_index, oid_items)
             logger.debug('Sending %d bytes of response', len(response))
             try:
                 sock.sendto(response, address)
