@@ -851,7 +851,11 @@ def snmp_server(host, port, oids):
                         oid_value = oid_value(oid)
                     oid_items.append((oid_to_bytes(oid), oid_value))
             elif pdu_type == ASN1_GET_NEXT_REQUEST_PDU:
+                oid = request_result[6][1]
                 error_status, error_index, oid, oid_value = handle_get_next_request(oids, oid)
+                if isinstance(oid_value, types.FunctionType):
+                    oid_value = oid_value(oid)
+                oid_items.append((oid_to_bytes(oid), oid_value))
             elif pdu_type == ASN1_SET_REQUEST_PDU:
                 if len(request_result) < 8:
                     raise Exception('Invalid ASN.1 parsed request length for SNMP set request!')
