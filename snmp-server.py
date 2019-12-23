@@ -55,6 +55,7 @@ ASN1_GET_REQUEST_PDU = 0xA0
 ASN1_GET_NEXT_REQUEST_PDU = 0xA1
 ASN1_GET_RESPONSE_PDU = 0xA2
 ASN1_SET_REQUEST_PDU = 0xA3
+ASN1_GET_BULK_REQUEST_PDU = 0xA5
 
 # error statuses
 ASN1_ERROR_STATUS_NO_ERROR = 0x00
@@ -348,7 +349,7 @@ def _parse_snmp_asn1(stream):
                 pdu_index in [1, 4, 5, 6] and tag != ASN1_INTEGER or
                 pdu_index == 2 and tag != ASN1_OCTET_STRING or
                 pdu_index == 3 and tag not in [
-                    ASN1_GET_REQUEST_PDU, ASN1_GET_NEXT_REQUEST_PDU, ASN1_SET_REQUEST_PDU]
+            ASN1_GET_REQUEST_PDU, ASN1_GET_NEXT_REQUEST_PDU, ASN1_SET_REQUEST_PDU, ASN1_GET_BULK_REQUEST_PDU]
         ):
             raise ProtocolError('Invalid tag for PDU unit "{}"'.format(SNMP_PDUS[pdu_index]))
         if tag == ASN1_SEQUENCE:
@@ -388,6 +389,13 @@ def _parse_snmp_asn1(stream):
             logger.debug('ASN1_GET_NEXT_REQUEST_PDU: %s', 'length = {}'.format(length))
             if pdu_index == 3:  # PDU-type
                 result.append(('ASN1_GET_NEXT_REQUEST_PDU', tag))
+
+        elif tag == ASN1_GET_BULK_REQUEST_PDU:
+            length = _parse_asn1_length(stream)
+            logger.debug('ASN1_GET_BULK_REQUEST_PDU: %s', 'length = {}'.format(length))
+            if pdu_index == 3:  # PDU-type
+                result.append(('ASN1_GET_BULK_REQUEST_PDU', tag))
+
         elif tag == ASN1_GET_RESPONSE_PDU:
             length = _parse_asn1_length(stream)
             logger.debug('ASN1_GET_RESPONSE_PDU: %s', 'length = {}'.format(length))
@@ -835,6 +843,8 @@ def snmp_server(host, port, oids):
             community = request_result[1][1]
             pdu_type = request_result[2][1]
             request_id = request_result[3][1]
+            max_repetitions = request_result[5][1]
+            logger.debug('max_repetitions %i ',  max_repetitions)
 
             error_status = ASN1_ERROR_STATUS_NO_ERROR
             error_index = 0
@@ -850,12 +860,22 @@ def snmp_server(host, port, oids):
                     if isinstance(oid_value, types.FunctionType):
                         oid_value = oid_value(oid)
                     oid_items.append((oid_to_bytes(oid), oid_value))
+
             elif pdu_type == ASN1_GET_NEXT_REQUEST_PDU:
                 oid = request_result[6][1]
                 error_status, error_index, oid, oid_value = handle_get_next_request(oids, oid)
                 if isinstance(oid_value, types.FunctionType):
                     oid_value = oid_value(oid)
                 oid_items.append((oid_to_bytes(oid), oid_value))
+
+            elif pdu_type == ASN1_GET_BULK_REQUEST_PDU:
+                oid = request_result[6][1]
+                for i in range(0, max_repetitions):
+                    error_status, error_index, oid, oid_value = handle_get_next_request(oids, oid)
+                    if isinstance(oid_value, types.FunctionType):
+                        oid_value = oid_value(oid)
+                    oid_items.append((oid_to_bytes(oid), oid_value))
+
             elif pdu_type == ASN1_SET_REQUEST_PDU:
                 if len(request_result) < 8:
                     raise Exception('Invalid ASN.1 parsed request length for SNMP set request!')
