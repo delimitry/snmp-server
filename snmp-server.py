@@ -869,12 +869,15 @@ def snmp_server(host, port, oids):
                 oid_items.append((oid_to_bytes(oid), oid_value))
 
             elif pdu_type == ASN1_GET_BULK_REQUEST_PDU:
-                oid = request_result[6][1]
+                requested_oids = request_result[6:]
                 for i in range(0, max_repetitions):
-                    error_status, error_index, oid, oid_value = handle_get_next_request(oids, oid)
-                    if isinstance(oid_value, types.FunctionType):
-                        oid_value = oid_value(oid)
-                    oid_items.append((oid_to_bytes(oid), oid_value))
+                    for idx, val in enumerate(requested_oids):
+                        oid = val[1]
+                        error_status, error_index, oid, oid_value = handle_get_next_request(oids, oid)
+                        if isinstance(oid_value, types.FunctionType):
+                            oid_value = oid_value(oid)
+                        oid_items.append((oid_to_bytes(oid), oid_value))
+                        requested_oids[idx] = ('OID', oid)
 
             elif pdu_type == ASN1_SET_REQUEST_PDU:
                 if len(request_result) < 8:
