@@ -210,7 +210,7 @@ def _read_int_len(stream, length, signed=False):
     return result
 
 
-def _write_int(value):
+def _write_int(value, strip_leading_zeros=True):
     """Write int"""
     if abs(value) > 0xffffffffffffffff:
         raise Exception('Int value must be in [0..18446744073709551615]')
@@ -226,7 +226,9 @@ def _write_int(value):
     else:
         result = struct.pack('>Q', value)
     # strip first null bytes, if all are null - leave one
-    return result.lstrip(b'\x00') or b'\x00'
+    result = result.lstrip(b'\x00') if strip_leading_zeros else result
+    return result or b'\x00'
+
 
 def _write_asn1_length(length):
     """Write ASN.1 length"""
@@ -270,7 +272,7 @@ def _parse_asn1_octet_string(stream):
 def _parse_asn1_opaque_float(stream):
     """Parse ASN.1 opaque float"""
     length = _parse_asn1_length(stream)
-    value = _read_int_len(stream, length)
+    value = _read_int_len(stream, length, signed=True)
     # convert int to float
     float_value = struct.unpack('>f', struct.pack('>l', value))[0]
     logger.debug('ASN1_OPAQUE_FLOAT: %s', round(float_value, 5))
@@ -280,7 +282,7 @@ def _parse_asn1_opaque_float(stream):
 def _parse_asn1_opaque_double(stream):
     """Parse ASN.1 opaque double"""
     length = _parse_asn1_length(stream)
-    value = _read_int_len(stream, length)
+    value = _read_int_len(stream, length, signed=True)
     # convert long long to double
     double_value = struct.unpack('>d', struct.pack('>q', value))[0]
     logger.debug('ASN1_OPAQUE_DOUBLE: %s', round(double_value, 5))
@@ -389,13 +391,11 @@ def _parse_snmp_asn1(stream):
             logger.debug('ASN1_GET_NEXT_REQUEST_PDU: %s', 'length = {}'.format(length))
             if pdu_index == 3:  # PDU-type
                 result.append(('ASN1_GET_NEXT_REQUEST_PDU', tag))
-
         elif tag == ASN1_GET_BULK_REQUEST_PDU:
             length = _parse_asn1_length(stream)
             logger.debug('ASN1_GET_BULK_REQUEST_PDU: %s', 'length = {}'.format(length))
             if pdu_index == 3:  # PDU-type
                 result.append(('ASN1_GET_BULK_REQUEST_PDU', tag))
-
         elif tag == ASN1_GET_RESPONSE_PDU:
             length = _parse_asn1_length(stream)
             logger.debug('ASN1_GET_RESPONSE_PDU: %s', 'length = {}'.format(length))
@@ -409,7 +409,7 @@ def _parse_snmp_asn1(stream):
             value = _read_int_len(stream, length)
             logger.debug('ASN1_TIMETICKS: %s (%s)', value, timeticks_to_str(value))
             if wait_oid_value:
-                result.append(('TIMETICKS', '({}) {}'.format(value, timeticks_to_str(value))))
+                result.append(('TIMETICKS', value))
                 wait_oid_value = False
         elif tag == ASN1_IPADDRESS:
             length = _read_byte(stream)
@@ -496,6 +496,8 @@ def boolean(value):
 
 def integer(value):
     """Get Integer"""
+    if not (-2147483648 <= value <= 2147483647):
+        raise Exception('Integer value must be in [-2147483648..2147483647]')
     return write_tv(ASN1_INTEGER, _write_int(value))
 
 
@@ -603,7 +605,7 @@ def gauge32(value):
     """Get Gauge32"""
     if value > 0xffffffff:
         raise Exception('Gauge32 value must be in [0..4294967295]')
-    return write_tv(ASN1_GAUGE32, _write_int(value))
+    return write_tv(ASN1_GAUGE32, _write_int(value, strip_leading_zeros=False))
 
 
 def counter32(value):
@@ -844,7 +846,7 @@ def snmp_server(host, port, oids):
             pdu_type = request_result[2][1]
             request_id = request_result[3][1]
             max_repetitions = request_result[5][1]
-            logger.debug('max_repetitions %i ',  max_repetitions)
+            logger.debug('max_repetitions %i', max_repetitions)
 
             error_status = ASN1_ERROR_STATUS_NO_ERROR
             error_index = 0
