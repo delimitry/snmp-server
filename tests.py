@@ -260,10 +260,10 @@ class Test(unittest.TestCase):
 
     def test_gauge32(self):
         """Test gauge32"""
-        self.assertEqual(gauge32(0), b'\x42\x01\x00')
-        self.assertEqual(gauge32(255), b'\x42\x01\xff')
-        self.assertEqual(gauge32(0xffff), b'\x42\x02\xff\xff')
-        self.assertEqual(gauge32(0xffffffff), b'\x42\x04\xff\xff\xff\xff')
+        self.assertEqual(gauge32(0), b'\x42\x08\x00\x00\x00\x00\x00\x00\x00\x00')
+        self.assertEqual(gauge32(255), b'\x42\x08\x00\x00\x00\x00\x00\x00\x00\xff')
+        self.assertEqual(gauge32(0xffff), b'\x42\x08\x00\x00\x00\x00\x00\x00\xff\xff')
+        self.assertEqual(gauge32(0xffffffff), b'\x42\x08\x00\x00\x00\x00\xff\xff\xff\xff')
         with self.assertRaises(Exception):
             gauge32(0xffffffffff)
 
