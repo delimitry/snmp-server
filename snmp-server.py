@@ -215,13 +215,13 @@ def _write_int(value, strip_leading_zeros=True):
     if abs(value) > 0xffffffffffffffff:
         raise Exception('Int value must be in [0..18446744073709551615]')
     if value < 0:
-        if abs(value) <= 0xff:
+        if abs(value) <= 0x7f:
             result = struct.pack('>b', value)
-        elif abs(value) <= 0xffff:
+        elif abs(value) <= 0x7fff:
             result = struct.pack('>h', value)
-        elif abs(value) <= 0xffffffff:
+        elif abs(value) <= 0x7fffffff:
             result = struct.pack('>i', value)
-        elif abs(value) <= 0xffffffffffffffff:
+        elif abs(value) <= 0x7fffffffffffffff:
             result = struct.pack('>q', value)
     else:
         result = struct.pack('>Q', value)
@@ -498,7 +498,7 @@ def integer(value):
     """Get Integer"""
     if not (-2147483648 <= value <= 2147483647):
         raise Exception('Integer value must be in [-2147483648..2147483647]')
-    return write_tv(ASN1_INTEGER, _write_int(value))
+    return write_tv(ASN1_INTEGER, _write_int(value, False))
 
 
 def bit_string(value):
