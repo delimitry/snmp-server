@@ -206,9 +206,11 @@ class Test(unittest.TestCase):
 
     def test_integer(self):
         """Test integer"""
-        self.assertEqual(integer(0), b'\x02\x01\x00')
-        self.assertEqual(integer(0xffff), b'\x02\x02\xff\xff')
-        self.assertEqual(integer(0x12345678), b'\x02\x04\x12\x34\x56\x78')
+        self.assertEqual(integer(0), b'\x02\x08\x00\x00\x00\x00\x00\x00\x00\x00')
+        self.assertEqual(integer(0xffff), b'\x02\x08\x00\x00\x00\x00\x00\x00\xff\xff')
+        self.assertEqual(integer(0x12345678), b'\x02\x08\x00\x00\x00\x00\x124Vx')
+        self.assertEqual(integer(-1), b'\x02\x01\xff')
+        self.assertEqual(integer(-0x12345678), b'\x02\x04\xed\xcb\xa9\x88')
 
     def test_octet_string(self):
         """Test octet string"""
