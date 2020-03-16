@@ -351,7 +351,11 @@ def _parse_snmp_asn1(stream):
                 pdu_index in [1, 4, 5, 6] and tag != ASN1_INTEGER or
                 pdu_index == 2 and tag != ASN1_OCTET_STRING or
                 pdu_index == 3 and tag not in [
-            ASN1_GET_REQUEST_PDU, ASN1_GET_NEXT_REQUEST_PDU, ASN1_SET_REQUEST_PDU, ASN1_GET_BULK_REQUEST_PDU]
+                    ASN1_GET_REQUEST_PDU,
+                    ASN1_GET_NEXT_REQUEST_PDU,
+                    ASN1_SET_REQUEST_PDU,
+                    ASN1_GET_BULK_REQUEST_PDU,
+                ]
         ):
             raise ProtocolError('Invalid tag for PDU unit "{}"'.format(SNMP_PDUS[pdu_index]))
         if tag == ASN1_SEQUENCE:
@@ -857,7 +861,7 @@ def snmp_server(host, port, oids):
             if pdu_type == ASN1_GET_REQUEST_PDU:
                 requested_oids = request_result[6:]
                 for _, oid in requested_oids:
-                    _error_status, _error_index, oid_value = handle_get_request(oids, oid)
+                    _, _, oid_value = handle_get_request(oids, oid)
                     # if oid value is a function - call it to get the value
                     if isinstance(oid_value, types.FunctionType):
                         oid_value = oid_value(oid)
@@ -872,7 +876,7 @@ def snmp_server(host, port, oids):
 
             elif pdu_type == ASN1_GET_BULK_REQUEST_PDU:
                 requested_oids = request_result[6:]
-                for i in range(0, max_repetitions):
+                for _ in range(0, max_repetitions):
                     for idx, val in enumerate(requested_oids):
                         oid = val[1]
                         error_status, error_index, oid, oid_value = handle_get_next_request(oids, oid)
@@ -886,7 +890,12 @@ def snmp_server(host, port, oids):
                     raise Exception('Invalid ASN.1 parsed request length for SNMP set request!')
                 oid = request_result[6][1]
                 type_and_value = request_result[7]
-                error_status, error_index, oid_value = handle_set_request(oids, oid, type_and_value)
+                try:
+                    error_status, error_index, oid_value = handle_set_request(oids, oid, type_and_value)
+                except Exception as ex:
+                    logger.error(ex)
+                    error_status = ASN1_ERROR_STATUS_BAD_VALUE
+                    error_index = 0
                 # if oid value is a function - call it to get the value
                 if isinstance(oid_value, types.FunctionType):
                     oid_value = oid_value(oid)
