@@ -15,13 +15,16 @@ import string
 import struct
 import sys
 import types
+
+from collections import Iterable
 from contextlib import closing
+
 try:
     from StringIO import StringIO
 except ImportError:
     from io import StringIO
 
-__version__ = '1.0.4'
+__version__ = '1.0.5'
 
 PY3 = sys.version_info[0] == 3
 
@@ -64,6 +67,7 @@ ASN1_ERROR_STATUS_NO_SUCH_NAME = 0x02
 ASN1_ERROR_STATUS_BAD_VALUE = 0x03
 ASN1_ERROR_STATUS_READ_ONLY = 0x04
 ASN1_ERROR_STATUS_GEN_ERR = 0x05
+ASN1_ERROR_STATUS_WRONG_VALUE = 0x0A
 
 # some ASN.1 opaque special types
 ASN1_CONTEXT = 0x80  # context-specific
@@ -107,6 +111,14 @@ class ProtocolError(Exception):
 
 class ConfigError(Exception):
     """Raise when config error occured"""
+
+
+class BadValueError(Exception):
+    """Raise when bad value error occured"""
+
+
+class WrongValueError(Exception):
+    """Raise when wrong value (e.g. value not in available range) error occured"""
 
 
 def encode_to_7bit(value):
@@ -498,11 +510,16 @@ def boolean(value):
     return write_tlv(ASN1_BOOLEAN, 1, b'\xff' if value else b'\x00')
 
 
-def integer(value):
+def integer(value, enum=None):
     """Get Integer"""
+    if enum and isinstance(enum, Iterable):
+        if not value in enum:
+            raise WrongValueError('Integer value {} is outside the range of enum values'.format(value))
     if not (-2147483648 <= value <= 2147483647):
         raise Exception('Integer value must be in [-2147483648..2147483647]')
-    return write_tv(ASN1_INTEGER, _write_int(value, False))
+    if not enum:
+        return write_tv(ASN1_INTEGER, _write_int(value, False))
+    return write_tv(ASN1_INTEGER, _write_int(value, False)), enum
 
 
 def bit_string(value):
@@ -758,7 +775,10 @@ def handle_set_request(oids, oid, type_and_value):
     error_index = 0
     value_type, value = type_and_value
     if value_type == 'INTEGER':
-        oids[oid] = integer(value)
+        enum_values = None
+        if isinstance(oids[oid], tuple) and len(oids[oid]) > 1:
+            enum_values = oids[oid][1]
+        oids[oid] = integer(value, enum=enum_values)
     elif value_type == 'STRING':
         oids[oid] = octet_string(value if PY3 else value.encode('latin'))
     elif value_type == 'OID':
@@ -865,6 +885,8 @@ def snmp_server(host, port, oids):
                     # if oid value is a function - call it to get the value
                     if isinstance(oid_value, types.FunctionType):
                         oid_value = oid_value(oid)
+                    if isinstance(oid_value, tuple):
+                        oid_value = oid_value[0]
                     oid_items.append((oid_to_bytes(oid), oid_value))
 
             elif pdu_type == ASN1_GET_NEXT_REQUEST_PDU:
@@ -872,6 +894,8 @@ def snmp_server(host, port, oids):
                 error_status, error_index, oid, oid_value = handle_get_next_request(oids, oid)
                 if isinstance(oid_value, types.FunctionType):
                     oid_value = oid_value(oid)
+                if isinstance(oid_value, tuple):
+                    oid_value = oid_value[0]
                 oid_items.append((oid_to_bytes(oid), oid_value))
 
             elif pdu_type == ASN1_GET_BULK_REQUEST_PDU:
@@ -882,6 +906,8 @@ def snmp_server(host, port, oids):
                         error_status, error_index, oid, oid_value = handle_get_next_request(oids, oid)
                         if isinstance(oid_value, types.FunctionType):
                             oid_value = oid_value(oid)
+                        if isinstance(oid_value, tuple):
+                            oid_value = oid_value[0]
                         oid_items.append((oid_to_bytes(oid), oid_value))
                         requested_oids[idx] = ('OID', oid)
 
@@ -891,7 +917,16 @@ def snmp_server(host, port, oids):
                 oid = request_result[6][1]
                 type_and_value = request_result[7]
                 try:
+                    if isinstance(oids[oid], tuple) and len(oids[oid]) > 1:
+                        enum_values = oids[oid][1]
+                        new_value = type_and_value[1]
+                        if isinstance(enum_values, Iterable) and new_value not in enum_values:
+                            raise WrongValueError('Value {} is outside the range of enum values'.format(new_value))
                     error_status, error_index, oid_value = handle_set_request(oids, oid, type_and_value)
+                except WrongValueError as ex:
+                    logger.error(ex)
+                    error_status = ASN1_ERROR_STATUS_WRONG_VALUE
+                    error_index = 0
                 except Exception as ex:
                     logger.error(ex)
                     error_status = ASN1_ERROR_STATUS_BAD_VALUE
@@ -899,6 +934,8 @@ def snmp_server(host, port, oids):
                 # if oid value is a function - call it to get the value
                 if isinstance(oid_value, types.FunctionType):
                     oid_value = oid_value(oid)
+                if isinstance(oid_value, tuple):
+                    oid_value = oid_value[0]
                 oid_items.append((oid_to_bytes(oid), oid_value))
 
             # craft SNMP response
