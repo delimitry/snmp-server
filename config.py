@@ -13,6 +13,8 @@ DATA = {
     '1.3.6.1.4.1.1.5.0': object_identifier('1.3.6.7.8.9'),
     '1.3.6.1.4.1.1.6.0': real(1.2345),
     '1.3.6.1.4.1.1.7.0': double(12345.2345),
+    # integer enumeration
+    '1.3.6.1.4.1.1.8.0': integer(1, enum=[1, 2, 3]),
     # notice the wildcards in the next OIDs:
     '1.3.6.1.4.1.1.?.0': lambda oid: octet_string('? {}'.format(oid)),
     '1.3.6.1.4.1.2.*': lambda oid: octet_string('* {}'.format(oid)),
