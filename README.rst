@@ -7,6 +7,20 @@ Description:
 ------------
 Simple SNMP server in pure Python  
 
+Usage with pytest:
+-----------------
+
+The fixture `snmpserver` has the `host` and `port` attributes, along with the `expect_request` method
+
+```
+def test_request_replies_correctly(snmpserver):
+    snmpserver.expect_request("1.3.6.1.2.1.2.2.1.2", "some description")
+    command = shlex.split(f'{snmpget_command} {snmpserver.host}:{snmpserver.port} IF-MIB::ifDescr')
+    p = subprocess.Popen(command, stdout=subprocess.PIPE)
+    p.wait()
+    assert 'IF-MIB::ifDescr some description' == p.stdout.read().decode('utf-8').strip()
+```
+
 Usage:
 -----
 ::
