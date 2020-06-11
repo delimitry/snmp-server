@@ -2,7 +2,9 @@
 #-*- coding: utf8 -*-
 
 import unittest
-snmp_server = __import__('snmp-server')  # import a module with dash
+from pytest_snmpserver.snmp_server import *
+from pytest_snmpserver.snmp_server import (_parse_asn1_length, _parse_snmp_asn1, _read_byte,
+                                           _read_int_len, _write_asn1_length, _write_int)
 
 try:
     from StringIO import StringIO
@@ -287,8 +289,3 @@ class Test(unittest.TestCase):
         with self.assertRaises(Exception):
             gauge32(0xffffffffffffffffff)
 
-
-if __name__ == '__main__':
-    globals().update(vars(snmp_server))  # hack for access all from 'snmp-server' module
-    logger.setLevel(logging.ERROR)
-    unittest.main(verbosity=2)

@@ -4,7 +4,6 @@
 Simple SNMP server in pure Python
 """
 
-from __future__ import print_function
 
 import argparse
 import fnmatch
@@ -14,10 +13,11 @@ import socket
 import string
 import struct
 import sys
+import threading
+import time
 import types
 
 from collections import Iterable
-from contextlib import closing
 
 try:
     from StringIO import StringIO
@@ -842,154 +842,167 @@ def craft_response(version, community, request_id, error_status, error_index, oi
     return response
 
 
-def snmp_server(host, port, oids):
-    """Main SNMP server loop"""
-    with closing(socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((host, port))
-        print('SNMP server listening on {}:{}'.format(host, port))
+def generate_response(request_result, oids):
 
-        # SNMP server main loop
-        while True:
-            request_data, address = sock.recvfrom(4096)
-            logger.debug('Received %d bytes from %s', len(request_data), address)
+    # get required fields from request
+    version = request_result[0][1]
+    community = request_result[1][1]
+    pdu_type = request_result[2][1]
+    request_id = request_result[3][1]
+    max_repetitions = request_result[5][1]
+    logger.debug('max_repetitions %i', max_repetitions)
 
-            request_stream = StringIO(request_data.decode('latin'))
-            try:
-                request_result = _parse_snmp_asn1(request_stream)
-            except ProtocolError as ex:
-                logger.error('SNMP request parsing failed: %s', ex)
-                continue
+    error_status = ASN1_ERROR_STATUS_NO_ERROR
+    error_index = 0
+    oid_items = []
+    oid_value = null()
 
-            if len(request_result) < 7:
-                raise Exception('Invalid ASN.1 parsed request length!')
+    # handle protocol data units
+    if pdu_type == ASN1_GET_REQUEST_PDU:
+        requested_oids = request_result[6:]
+        for _, oid in requested_oids:
+            _, _, oid_value = handle_get_request(oids, oid)
+            # if oid value is a function - call it to get the value
+            if isinstance(oid_value, types.FunctionType):
+                oid_value = oid_value(oid)
+            if isinstance(oid_value, tuple):
+                oid_value = oid_value[0]
+            oid_items.append((oid_to_bytes(oid), oid_value))
 
-            # get required fields from request
-            version = request_result[0][1]
-            community = request_result[1][1]
-            pdu_type = request_result[2][1]
-            request_id = request_result[3][1]
-            max_repetitions = request_result[5][1]
-            logger.debug('max_repetitions %i', max_repetitions)
+    elif pdu_type == ASN1_GET_NEXT_REQUEST_PDU:
+        oid = request_result[6][1]
+        error_status, error_index, oid, oid_value = handle_get_next_request(oids, oid)
+        if isinstance(oid_value, types.FunctionType):
+            oid_value = oid_value(oid)
+        if isinstance(oid_value, tuple):
+            oid_value = oid_value[0]
+        oid_items.append((oid_to_bytes(oid), oid_value))
 
-            error_status = ASN1_ERROR_STATUS_NO_ERROR
-            error_index = 0
-            oid_items = []
-            oid_value = null()
-
-            # handle protocol data units
-            if pdu_type == ASN1_GET_REQUEST_PDU:
-                requested_oids = request_result[6:]
-                for _, oid in requested_oids:
-                    _, _, oid_value = handle_get_request(oids, oid)
-                    # if oid value is a function - call it to get the value
-                    if isinstance(oid_value, types.FunctionType):
-                        oid_value = oid_value(oid)
-                    if isinstance(oid_value, tuple):
-                        oid_value = oid_value[0]
-                    oid_items.append((oid_to_bytes(oid), oid_value))
-
-            elif pdu_type == ASN1_GET_NEXT_REQUEST_PDU:
-                oid = request_result[6][1]
+    elif pdu_type == ASN1_GET_BULK_REQUEST_PDU:
+        requested_oids = request_result[6:]
+        for _ in range(0, max_repetitions):
+            for idx, val in enumerate(requested_oids):
+                oid = val[1]
                 error_status, error_index, oid, oid_value = handle_get_next_request(oids, oid)
                 if isinstance(oid_value, types.FunctionType):
                     oid_value = oid_value(oid)
                 if isinstance(oid_value, tuple):
                     oid_value = oid_value[0]
                 oid_items.append((oid_to_bytes(oid), oid_value))
+                requested_oids[idx] = ('OID', oid)
 
-            elif pdu_type == ASN1_GET_BULK_REQUEST_PDU:
-                requested_oids = request_result[6:]
-                for _ in range(0, max_repetitions):
-                    for idx, val in enumerate(requested_oids):
-                        oid = val[1]
-                        error_status, error_index, oid, oid_value = handle_get_next_request(oids, oid)
-                        if isinstance(oid_value, types.FunctionType):
-                            oid_value = oid_value(oid)
-                        if isinstance(oid_value, tuple):
-                            oid_value = oid_value[0]
-                        oid_items.append((oid_to_bytes(oid), oid_value))
-                        requested_oids[idx] = ('OID', oid)
+    elif pdu_type == ASN1_SET_REQUEST_PDU:
+        if len(request_result) < 8:
+            raise Exception('Invalid ASN.1 parsed request length for SNMP set request!')
+        oid = request_result[6][1]
+        type_and_value = request_result[7]
+        try:
+            if isinstance(oids[oid], tuple) and len(oids[oid]) > 1:
+                enum_values = oids[oid][1]
+                new_value = type_and_value[1]
+                if isinstance(enum_values, Iterable) and new_value not in enum_values:
+                    raise WrongValueError('Value {} is outside the range of enum values'.format(new_value))
+            error_status, error_index, oid_value = handle_set_request(oids, oid, type_and_value)
+        except WrongValueError as ex:
+            logger.error(ex)
+            error_status = ASN1_ERROR_STATUS_WRONG_VALUE
+            error_index = 0
+        except Exception as ex:
+            logger.error(ex)
+            error_status = ASN1_ERROR_STATUS_BAD_VALUE
+            error_index = 0
+        # if oid value is a function - call it to get the value
+        if isinstance(oid_value, types.FunctionType):
+            oid_value = oid_value(oid)
+        if isinstance(oid_value, tuple):
+            oid_value = oid_value[0]
+        oid_items.append((oid_to_bytes(oid), oid_value))
 
-            elif pdu_type == ASN1_SET_REQUEST_PDU:
-                if len(request_result) < 8:
-                    raise Exception('Invalid ASN.1 parsed request length for SNMP set request!')
-                oid = request_result[6][1]
-                type_and_value = request_result[7]
-                try:
-                    if isinstance(oids[oid], tuple) and len(oids[oid]) > 1:
-                        enum_values = oids[oid][1]
-                        new_value = type_and_value[1]
-                        if isinstance(enum_values, Iterable) and new_value not in enum_values:
-                            raise WrongValueError('Value {} is outside the range of enum values'.format(new_value))
-                    error_status, error_index, oid_value = handle_set_request(oids, oid, type_and_value)
-                except WrongValueError as ex:
-                    logger.error(ex)
-                    error_status = ASN1_ERROR_STATUS_WRONG_VALUE
-                    error_index = 0
-                except Exception as ex:
-                    logger.error(ex)
-                    error_status = ASN1_ERROR_STATUS_BAD_VALUE
-                    error_index = 0
-                # if oid value is a function - call it to get the value
-                if isinstance(oid_value, types.FunctionType):
-                    oid_value = oid_value(oid)
-                if isinstance(oid_value, tuple):
-                    oid_value = oid_value[0]
-                oid_items.append((oid_to_bytes(oid), oid_value))
+    # craft SNMP response
+    response = craft_response(
+        version, community, request_id, error_status, error_index, oid_items)
+    return response
 
-            # craft SNMP response
-            response = craft_response(
-                version, community, request_id, error_status, error_index, oid_items)
-            logger.debug('Sending %d bytes of response', len(response))
-            try:
-                sock.sendto(response, address)
-            except socket.error as ex:
-                logger.error('Failed to send %d bytes of response: %s', len(response), ex)
-            logger.debug('')
+def send_response(sock, response, address):
+    logger.debug('Sending %d bytes of response', len(response))
+    try:
+        sock.sendto(response, address)
+    except socket.error as ex:
+        logger.error('Failed to send %d bytes of response: %s', len(response), ex)
+    logger.debug('')
+
+
+class SNMPServer:
+    DEFAULT_LISTEN_HOST = '0.0.0.0'
+    DEFAULT_LISTEN_PORT = 1234
+
+    def __init__(self, host, port):
+        self.host = host
+        self.port = port
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.expected_messages = dict()
+        self._is_running = True
+
+    def __enter__(self):
+        self.sock.bind((self.host, self.port))
+        logger.info('SNMP server listening on {}:{}'.format(self.host, self.port))
+        return self
+
+    def __exit__(self, exception_type, exception_vale, traceback):
+        self._is_running = False
+        self.sock.close()
+
+    def process_request(self):
+        while self._is_running:
+            request_data, address = self.sock.recvfrom(4096)
+            logger.debug('Received %d bytes from %s', len(request_data), address)
+
+            request_stream = StringIO(request_data.decode('latin'))
+            request_result = _parse_snmp_asn1(request_stream)
+
+            if len(request_result) < 7:
+                raise Exception('Invalid ASN.1 parsed request length!')
+            request = dict(request_result)
+            print(request)
+
+            _id = request['OID']
+            if _id not in self.expected_messages:
+                self.sock.close()
+                raise ValueError(f'Request OID ({_id}) was not expected')
+
+            response = generate_response(request_result, self.expected_messages)
+            send_response(self.sock, response, address)
+
+    def expect_request(self, request_id, reply_with, populate_parent=True):
+        if isinstance(reply_with, str):
+            reply = octet_string(reply_with)
+        elif isinstance(reply_with, int):
+            reply = integer(reply_with)
+        elif isinstance(reply_with, list):
+            reply = integer(reply_with[0], enum=reply_with)
+        else:
+            print('wtf!!', reply_with)
+            reply = reply_with
+
+        print(request_id, reply)
+        self.expected_messages[request_id] = reply
+        if populate_parent:
+            parent = request_id.rpartition('.')[0]
+            if parent not in self.expected_messages:
+                self.expected_messages[parent] = None
 
 
 def main():
-    """Main"""
-    parser = argparse.ArgumentParser(description='SNMP server')
-    parser.add_argument(
-        '-p', '--port', dest='port', type=int,
-        help='port (by default 161 - requires root privileges)', default=161, required=False)
-    parser.add_argument(
-        '-c', '--config', type=str,
-        help='OIDs config file', required=False)
-    parser.add_argument(
-        '-d', '--debug',
-        help='run in debug mode', action='store_true')
-    parser.add_argument(
-        '-v', '--version', action='version',
-        version='SNMP server v{}'.format(__version__))
-
-    args = parser.parse_args()
-
-    if args.debug:
-        logger.setLevel(logging.DEBUG)
-
-    # work as an echo server if no config is passed
-    oids = {
-        '*': lambda oid: octet_string(oid),
-    }
-    # read a config
-    config_filename = args.config
-    if config_filename:
-        try:
-            oids = parse_config(config_filename)
-        except ConfigError as ex:
-            logger.error(ex)
-            sys.exit(-1)
-
     host = '0.0.0.0'
-    port = args.port
-    try:
-        snmp_server(host, port, oids)
-    except KeyboardInterrupt:
-        logger.debug('Interrupted by Ctrl+C')
+    port = 1234
+    s = SNMPServer(host, port)
+    s.start()
+    print(s.expect_request('1.3.6.1.2.1.2.2.1.2'))
+    s.stop()
+    s.join()
 
 
 if __name__ == '__main__':
     main()
+
