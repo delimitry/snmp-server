@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 
-from setuptools import setup, find_packages
+from setuptools import setup
 
 setup(
     name="pytest_snmpserver",
-    version="0.1",
-    packages=find_packages(),
-    short_description="SNMP server as a pytest plugin",
+    version="0.1.1",
+    packages=["pytest_snmpserver"],
     long_description="SNMP server as a pytest plugin",
     long_description_content_type="text/markdown",
     python_requires=">=3.6",
