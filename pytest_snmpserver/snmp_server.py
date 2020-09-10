@@ -973,7 +973,7 @@ class SNMPServer:
                 raise ValueError(f'Request OID ({_id}) was not expected')
 
             response = generate_response(request_result, self.expected_messages)
-            time.sleep(DELAY_BEFORE_REPLY)
+            time.sleep(self.DELAY_BEFORE_REPLY)
             send_response(self.sock, response, address)
 
     def expect_request(self, request_id, reply_with, populate_parent=True):
