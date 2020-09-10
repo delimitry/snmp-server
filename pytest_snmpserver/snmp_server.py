@@ -935,6 +935,7 @@ def send_response(sock, response, address):
 class SNMPServer:
     DEFAULT_LISTEN_HOST = '0.0.0.0'
     DEFAULT_LISTEN_PORT = 1234
+    DELAY_BEFORE_REPLY = 0
 
     def __init__(self, host, port):
         self.host = host
@@ -972,6 +973,7 @@ class SNMPServer:
                 raise ValueError(f'Request OID ({_id}) was not expected')
 
             response = generate_response(request_result, self.expected_messages)
+            time.sleep(DELAY_BEFORE_REPLY)
             send_response(self.sock, response, address)
 
     def expect_request(self, request_id, reply_with, populate_parent=True):
