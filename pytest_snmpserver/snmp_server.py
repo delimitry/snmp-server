@@ -934,7 +934,7 @@ def send_response(sock, response, address):
 
 class SNMPServer:
     DEFAULT_LISTEN_HOST = '0.0.0.0'
-    DEFAULT_LISTEN_PORT = 1234
+    DEFAULT_LISTEN_PORT = 0
     DELAY_BEFORE_REPLY = 0
 
     def __init__(self, host, port):
@@ -947,6 +947,8 @@ class SNMPServer:
 
     def __enter__(self):
         self.sock.bind((self.host, self.port))
+        if self.port == 0:
+            self.port = self.getsockname()[1]
         logger.info('SNMP server listening on {}:{}'.format(self.host, self.port))
         return self
 
