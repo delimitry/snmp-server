@@ -4,7 +4,7 @@ from setuptools import setup
 
 setup(
     name="pytest_snmpserver",
-    version="0.1.5",
+    version="0.1.6",
     packages=["pytest_snmpserver"],
     long_description="SNMP server as a pytest plugin",
     long_description_content_type="text/markdown",

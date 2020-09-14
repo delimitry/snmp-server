@@ -945,16 +945,22 @@ class SNMPServer:
         self.expected_messages = dict()
         self._is_running = True
 
-    def __enter__(self):
+    def start(self):
         self.sock.bind((self.host, self.port))
         if self.port == 0:
             self.port = self.sock.getsockname()[1]
         logger.info('SNMP server listening on {}:{}'.format(self.host, self.port))
+
+    def stop(self):
+        self._is_running = False
+        self.sock.close()
+
+    def __enter__(self):
+        self.start()
         return self
 
     def __exit__(self, exception_type, exception_vale, traceback):
-        self._is_running = False
-        self.sock.close()
+        self.stop()
 
     def process_request(self):
         while self._is_running:
@@ -1004,7 +1010,6 @@ def main():
     s.start()
     print(s.expect_request('1.3.6.1.2.1.2.2.1.2'))
     s.stop()
-    s.join()
 
 
 if __name__ == '__main__':
