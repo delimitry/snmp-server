@@ -948,7 +948,7 @@ class SNMPServer:
     def __enter__(self):
         self.sock.bind((self.host, self.port))
         if self.port == 0:
-            self.port = self.getsockname()[1]
+            self.port = self.sock.getsockname()[1]
         logger.info('SNMP server listening on {}:{}'.format(self.host, self.port))
         return self
 
