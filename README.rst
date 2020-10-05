@@ -8,9 +8,11 @@ Description:
 Simple SNMP server in pure Python  
 
 Usage with pytest:
------------------
+------------------
 
-The fixture `snmpserver` has the `host` and `port` attributes, along with the `expect_request` method
+It is possible to use snmpserver as pytest plugin. This option requires Python >=3.6.
+
+The fixture ``snmpserver`` has the ``host`` and ``port`` attributes (which can be set via environment variables ``PYTEST_SNMPSERVER_HOST`` and ``PYTEST_SNMPSERVER_PORT``), along with the ``expect_request`` method:
 
 ::
 
@@ -22,11 +24,14 @@ The fixture `snmpserver` has the `host` and `port` attributes, along with the `e
       assert 'IF-MIB::ifDescr some description' == p.stdout.read().decode('utf-8').strip()
 
 
-Usage:
------
+Standalone usage:
+-----------------
+
+It is also possible to use standalone version of SNMP server, which works as an echo server if no config is passed. This version supports Python 2 and 3.
+
 ::
 
-  usage: snmp-server.py [-h] [-p PORT] [-c CONFIG] [-d] [-v]
+  Standalone usage: snmp-server.py [-h] [-p PORT] [-c CONFIG] [-d] [-v]
 
   SNMP server
 
