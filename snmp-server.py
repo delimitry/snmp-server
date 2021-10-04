@@ -15,7 +15,6 @@ import string
 import struct
 import sys
 import types
-
 from collections import Iterable
 from contextlib import closing
 
@@ -58,7 +57,10 @@ ASN1_GET_REQUEST_PDU = 0xA0
 ASN1_GET_NEXT_REQUEST_PDU = 0xA1
 ASN1_GET_RESPONSE_PDU = 0xA2
 ASN1_SET_REQUEST_PDU = 0xA3
+ASN1_TRAP_REQUEST_PDU = 0xA4
 ASN1_GET_BULK_REQUEST_PDU = 0xA5
+ASN1_INFORM_REQUEST_PDU = 0xA6
+ASN1_SNMPv2_TRAP_REQUEST_PDU = 0xA7
 
 # error statuses
 ASN1_ERROR_STATUS_NO_ERROR = 0x00
@@ -162,8 +164,7 @@ def bytes_to_oid(data):
     while values:
         val = values.pop(0)
         if val > 0x7f:
-            huges = []
-            huges.append(val)
+            huges = [val]
             while True:
                 next_val = values.pop(0)
                 huges.append(next_val)
@@ -235,6 +236,8 @@ def _write_int(value, strip_leading_zeros=True):
             result = struct.pack('>i', value)
         elif abs(value) <= 0x7fffffffffffffff:
             result = struct.pack('>q', value)
+        else:
+            raise Exception('Min signed int value')  # TODO: check this
     else:
         result = struct.pack('>Q', value)
     # strip first null bytes, if all are null - leave one
@@ -367,6 +370,9 @@ def _parse_snmp_asn1(stream):
                     ASN1_GET_NEXT_REQUEST_PDU,
                     ASN1_SET_REQUEST_PDU,
                     ASN1_GET_BULK_REQUEST_PDU,
+                    ASN1_TRAP_REQUEST_PDU,
+                    ASN1_INFORM_REQUEST_PDU,
+                    ASN1_SNMPv2_TRAP_REQUEST_PDU,
                 ]
         ):
             raise ProtocolError('Invalid tag for PDU unit "{}"'.format(SNMP_PDUS[pdu_index]))
@@ -420,6 +426,20 @@ def _parse_snmp_asn1(stream):
             logger.debug('ASN1_SET_REQUEST_PDU: %s', 'length = {}'.format(length))
             if pdu_index == 3:  # PDU-type
                 result.append(('ASN1_SET_REQUEST_PDU', tag))
+        elif tag == ASN1_TRAP_REQUEST_PDU:
+            raise Exception('TRAP request PDU is not supported!')  # TODO: add support
+        elif tag == ASN1_INFORM_REQUEST_PDU:
+            if result:
+                version = result[0][1]
+                if version == 1:
+                    raise Exception('INFORM request PDU is not supported in SNMPv1!')  # TODO: add support
+            raise Exception('INFORM request PDU is not supported!')
+        elif tag == ASN1_SNMPv2_TRAP_REQUEST_PDU:
+            if result:
+                version = result[0][1]
+                if version == 1:
+                    raise Exception('SNMPv2 TRAP PDU request is not supported in SNMPv1!')  # TODO: add support
+            raise Exception('SNMPv2 TRAP request PDU is not supported!')
         elif tag == ASN1_TIMETICKS:
             length = _read_byte(stream)
             value = _read_int_len(stream, length)
@@ -475,11 +495,10 @@ def _parse_snmp_asn1(stream):
         elif tag == ASN1_END_OF_MIB_VIEW:
             value = _read_byte(stream)
             logger.debug('ASN1_END_OF_MIB_VIEW: %s', value)
-            return (('', ''), ('', ''))
+            return ('', ''), ('', '')
         else:
             logger.debug('?: %s', hex(ord(read_byte)))
         pdu_index += 1
-    return result
 
 
 def get_next_oid(oid):
@@ -513,7 +532,7 @@ def boolean(value):
 def integer(value, enum=None):
     """Get Integer"""
     if enum and isinstance(enum, Iterable):
-        if not value in enum:
+        if value not in enum:
             raise WrongValueError('Integer value {} is outside the range of enum values'.format(value))
     if not (-2147483648 <= value <= 2147483647):
         raise Exception('Integer value must be in [-2147483648..2147483647]')
@@ -587,7 +606,6 @@ def uint64(value):
         'BB', ASN1_OPAQUE_TAG1, ASN1_OPAQUE_UINT64
     ) + _write_asn1_length(len(uint64_value)) + uint64_value
     return write_tv(ASN1_OPAQUE, opaque_type_value)
-
 
 
 def utf8_string(value):
@@ -676,7 +694,6 @@ def get_next(oids, oid):
 
 def parse_config(filename):
     """Read and parse a config"""
-    oids = {}
     try:
         with open(filename, 'rb') as conf_file:
             data = conf_file.read()
@@ -736,12 +753,10 @@ def handle_get_next_request(oids, oid):
     """Handle GetNextRequest"""
     error_status = ASN1_ERROR_STATUS_NO_ERROR
     error_index = 0
-    oid_value = null()
-    new_oid = None
     if oid in oids:
         new_oid = get_next(oids, oid)
         if not new_oid:
-            oid_value = struct.pack('BB', ASN1_END_OF_MIB_VIEW, 0)  #null()
+            oid_value = struct.pack('BB', ASN1_END_OF_MIB_VIEW, 0)
         else:
             oid_value = oids.get(new_oid)
     else:
