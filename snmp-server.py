@@ -61,6 +61,7 @@ ASN1_TRAP_REQUEST_PDU = 0xA4
 ASN1_GET_BULK_REQUEST_PDU = 0xA5
 ASN1_INFORM_REQUEST_PDU = 0xA6
 ASN1_SNMPv2_TRAP_REQUEST_PDU = 0xA7
+ASN1_REPORT_REQUEST_PDU = 0xA8
 
 # error statuses
 ASN1_ERROR_STATUS_NO_ERROR = 0x00
@@ -108,19 +109,19 @@ SNMP_PDUS = (
 
 
 class ProtocolError(Exception):
-    """Raise when SNMP protocol error occured"""
+    """Raise when SNMP protocol error occurred"""
 
 
 class ConfigError(Exception):
-    """Raise when config error occured"""
+    """Raise when config error occurred"""
 
 
 class BadValueError(Exception):
-    """Raise when bad value error occured"""
+    """Raise when bad value error occurred"""
 
 
 class WrongValueError(Exception):
-    """Raise when wrong value (e.g. value not in available range) error occured"""
+    """Raise when wrong value (e.g. value not in available range) error occurred"""
 
 
 def encode_to_7bit(value):
@@ -164,15 +165,15 @@ def bytes_to_oid(data):
     while values:
         val = values.pop(0)
         if val > 0x7f:
-            huges = [val]
+            huge_vals = [val]
             while True:
                 next_val = values.pop(0)
-                huges.append(next_val)
+                huge_vals.append(next_val)
                 if next_val < 0x80:
                     break
             huge = 0
-            for i, huge_byte in enumerate(huges):
-                huge += (huge_byte & 0x7f) << (7 * (len(huges) - i - 1))
+            for i, huge_byte in enumerate(huge_vals):
+                huge += (huge_byte & 0x7f) << (7 * (len(huge_vals) - i - 1))
             res.append(huge)
         else:
             res.append(val)
@@ -279,7 +280,7 @@ def _parse_asn1_octet_string(stream):
     length = _parse_asn1_length(stream)
     value = stream.read(length)
     # if any char is not printable - convert string to hex
-    if any([c not in string.printable for c in value]):
+    if any(c not in string.printable for c in value):
         return ' '.join(['%02X' % ord(x) for x in value])
     return value
 
@@ -346,10 +347,44 @@ def _parse_asn1_opaque(stream):
     return stream.read(length)
 
 
+def _is_trap_request(result):
+    """Checks if it is Trap-PDU request."""
+    return len(result) > 2 and result[2][1] == ASN1_TRAP_REQUEST_PDU
+
+
+def _validate_protocol(pdu_index, tag, result):
+    """Validates the protocol and returns True if valid, or False otherwise."""
+    if _is_trap_request(result):
+        if (
+                pdu_index == 4 and tag != ASN1_OBJECT_IDENTIFIER or
+                pdu_index == 5 and tag != ASN1_IPADDRESS or
+                pdu_index in [6, 7] and tag != ASN1_INTEGER or
+                pdu_index == 8 and tag != ASN1_TIMETICKS
+        ):
+            return False
+    elif (
+            pdu_index in [1, 4, 5, 6] and tag != ASN1_INTEGER or
+            pdu_index == 2 and tag != ASN1_OCTET_STRING or
+            pdu_index == 3 and tag not in [
+                ASN1_GET_REQUEST_PDU,
+                ASN1_GET_NEXT_REQUEST_PDU,
+                ASN1_SET_REQUEST_PDU,
+                ASN1_GET_BULK_REQUEST_PDU,
+                ASN1_TRAP_REQUEST_PDU,
+                ASN1_INFORM_REQUEST_PDU,
+                ASN1_SNMPv2_TRAP_REQUEST_PDU,
+            ]
+    ):
+        return False
+    return True
+
+
 def _parse_snmp_asn1(stream):
     """Parse SNMP ASN.1
     After |IP|UDP| headers and "sequence" tag, SNMP protocol data units (PDUs) are the next:
     |version|community|PDU-type|request-id|error-status|error-index|variable bindings|
+    but for ASN1_TRAP_REQUEST_PDU next:
+    |version|community|PDU-type|enterprise-oid|agent|trap-type|specific-type|uptime|
     """
     result = []
     wait_oid_value = False
@@ -362,19 +397,7 @@ def _parse_snmp_asn1(stream):
             return result
         tag = ord(read_byte)
         # check protocol's tags at indices
-        if (
-                pdu_index in [1, 4, 5, 6] and tag != ASN1_INTEGER or
-                pdu_index == 2 and tag != ASN1_OCTET_STRING or
-                pdu_index == 3 and tag not in [
-                    ASN1_GET_REQUEST_PDU,
-                    ASN1_GET_NEXT_REQUEST_PDU,
-                    ASN1_SET_REQUEST_PDU,
-                    ASN1_GET_BULK_REQUEST_PDU,
-                    ASN1_TRAP_REQUEST_PDU,
-                    ASN1_INFORM_REQUEST_PDU,
-                    ASN1_SNMPv2_TRAP_REQUEST_PDU,
-                ]
-        ):
+        if not _validate_protocol(pdu_index, tag, result):
             raise ProtocolError('Invalid tag for PDU unit "{}"'.format(SNMP_PDUS[pdu_index]))
         if tag == ASN1_SEQUENCE:
             length = _parse_asn1_length(stream)
@@ -384,7 +407,7 @@ def _parse_snmp_asn1(stream):
             value = _read_int_len(stream, length, True)
             logger.debug('ASN1_INTEGER: %s', value)
             # pdu_index is version, request-id, error-status, error-index
-            if wait_oid_value or pdu_index in [1, 4, 5, 6]:
+            if wait_oid_value or pdu_index in [1, 4, 5, 6] or _is_trap_request(result):
                 result.append(('INTEGER', value))
                 wait_oid_value = False
         elif tag == ASN1_OCTET_STRING:
@@ -427,31 +450,38 @@ def _parse_snmp_asn1(stream):
             if pdu_index == 3:  # PDU-type
                 result.append(('ASN1_SET_REQUEST_PDU', tag))
         elif tag == ASN1_TRAP_REQUEST_PDU:
-            raise Exception('TRAP request PDU is not supported!')  # TODO: add support
+            length = _parse_asn1_length(stream)
+            logger.debug('ASN1_TRAP_REQUEST_PDU: %s', 'length = {}'.format(length))
+            if pdu_index == 3:  # PDU-type
+                result.append(('ASN1_TRAP_REQUEST_PDU', tag))
         elif tag == ASN1_INFORM_REQUEST_PDU:
-            if result:
-                version = result[0][1]
-                if version == 1:
-                    raise Exception('INFORM request PDU is not supported in SNMPv1!')  # TODO: add support
-            raise Exception('INFORM request PDU is not supported!')
+            if result and result[0][1] == 0:
+                raise Exception('INFORM request PDU is not supported in SNMPv1!')
+            length = _parse_asn1_length(stream)
+            logger.debug('ASN1_INFORM_REQUEST_PDU: %s', 'length = {}'.format(length))
+            if pdu_index == 3:  # PDU-type
+                result.append(('ASN1_INFORM_REQUEST_PDU', tag))
         elif tag == ASN1_SNMPv2_TRAP_REQUEST_PDU:
-            if result:
-                version = result[0][1]
-                if version == 1:
-                    raise Exception('SNMPv2 TRAP PDU request is not supported in SNMPv1!')  # TODO: add support
-            raise Exception('SNMPv2 TRAP request PDU is not supported!')
+            if result and result[0][1] == 0:
+                raise Exception('SNMPv2 TRAP PDU request is not supported in SNMPv1!')
+            length = _parse_asn1_length(stream)
+            logger.debug('ASN1_SNMPv2_TRAP_REQUEST_PDU: %s', 'length = {}'.format(length))
+            if pdu_index == 3:  # PDU-type
+                result.append(('ASN1_SNMPv2_TRAP_REQUEST_PDU', tag))
+        elif tag == ASN1_REPORT_REQUEST_PDU:
+            raise Exception('Report request PDU is not supported!')
         elif tag == ASN1_TIMETICKS:
             length = _read_byte(stream)
             value = _read_int_len(stream, length)
             logger.debug('ASN1_TIMETICKS: %s (%s)', value, timeticks_to_str(value))
-            if wait_oid_value:
+            if wait_oid_value or _is_trap_request(result):
                 result.append(('TIMETICKS', value))
                 wait_oid_value = False
         elif tag == ASN1_IPADDRESS:
             length = _read_byte(stream)
             value = _read_int_len(stream, length)
             logger.debug('ASN1_IPADDRESS: %s (%s)', value, int_to_ip(value))
-            if wait_oid_value:
+            if wait_oid_value or _is_trap_request(result):
                 result.append(('IPADDRESS', int_to_ip(value)))
                 wait_oid_value = False
         elif tag == ASN1_COUNTER32:
@@ -531,9 +561,8 @@ def boolean(value):
 
 def integer(value, enum=None):
     """Get Integer"""
-    if enum and isinstance(enum, Iterable):
-        if value not in enum:
-            raise WrongValueError('Integer value {} is outside the range of enum values'.format(value))
+    if enum and isinstance(enum, Iterable) and value not in enum:
+        raise WrongValueError('Integer value {} is outside the range of enum values'.format(value))
     if not (-2147483648 <= value <= 2147483647):
         raise Exception('Integer value must be in [-2147483648..2147483647]')
     if not enum:
@@ -701,9 +730,8 @@ def parse_config(filename):
             exec(data, globals(), out_locals)
             oids = out_locals['DATA']
             for value in oids.values():
-                if isinstance(value, types.FunctionType):
-                    if value.__code__.co_argcount != 1:
-                        raise ConfigError('"{}" must have one argument'.format(value.__name__))
+                if isinstance(value, types.FunctionType) and value.__code__.co_argcount != 1:
+                    raise ConfigError('"{}" must have one argument'.format(value.__name__))
             return oids
     except Exception as ex:
         raise ConfigError('Config parsing error: {}'.format(ex))
@@ -876,16 +904,15 @@ def snmp_server(host, port, oids):
                 logger.error('SNMP request parsing failed: %s', ex)
                 continue
 
-            if len(request_result) < 7:
-                raise Exception('Invalid ASN.1 parsed request length!')
-
             # get required fields from request
             version = request_result[0][1]
             community = request_result[1][1]
             pdu_type = request_result[2][1]
             request_id = request_result[3][1]
-            max_repetitions = request_result[5][1]
-            logger.debug('max_repetitions %i', max_repetitions)
+
+            expected_length = 8 if pdu_type == ASN1_TRAP_REQUEST_PDU else 7
+            if len(request_result) < expected_length:
+                raise Exception('Invalid ASN.1 parsed request length! %s' % str(request_result))
 
             error_status = ASN1_ERROR_STATUS_NO_ERROR
             error_index = 0
@@ -903,7 +930,6 @@ def snmp_server(host, port, oids):
                     if isinstance(oid_value, tuple):
                         oid_value = oid_value[0]
                     oid_items.append((oid_to_bytes(oid), oid_value))
-
             elif pdu_type == ASN1_GET_NEXT_REQUEST_PDU:
                 oid = request_result[6][1]
                 error_status, error_index, oid, oid_value = handle_get_next_request(oids, oid)
@@ -912,8 +938,9 @@ def snmp_server(host, port, oids):
                 if isinstance(oid_value, tuple):
                     oid_value = oid_value[0]
                 oid_items.append((oid_to_bytes(oid), oid_value))
-
             elif pdu_type == ASN1_GET_BULK_REQUEST_PDU:
+                max_repetitions = request_result[5][1]
+                logger.debug('max_repetitions: %i', max_repetitions)
                 requested_oids = request_result[6:]
                 for _ in range(0, max_repetitions):
                     for idx, val in enumerate(requested_oids):
@@ -925,7 +952,6 @@ def snmp_server(host, port, oids):
                             oid_value = oid_value[0]
                         oid_items.append((oid_to_bytes(oid), oid_value))
                         requested_oids[idx] = ('OID', oid)
-
             elif pdu_type == ASN1_SET_REQUEST_PDU:
                 if len(request_result) < 8:
                     raise Exception('Invalid ASN.1 parsed request length for SNMP set request!')
@@ -952,6 +978,23 @@ def snmp_server(host, port, oids):
                 if isinstance(oid_value, tuple):
                     oid_value = oid_value[0]
                 oid_items.append((oid_to_bytes(oid), oid_value))
+            elif pdu_type == ASN1_INFORM_REQUEST_PDU:
+                if len(request_result) < 8:
+                    raise Exception('Invalid ASN.1 parsed request length for SNMP set request!')
+                requested_oids = request_result[6:]
+                if len(requested_oids) % 2:
+                    raise Exception('Invalid length of OID and value items in SNMP inform request!')
+                for i in range(0, len(requested_oids), 2):
+                    oid = requested_oids[i][1]
+                    type_and_value = requested_oids[i + 1]
+                    error_status, error_index, oid_value = handle_set_request(oids, oid, type_and_value)
+                    if isinstance(oid_value, types.FunctionType):
+                        oid_value = oid_value(oid)
+                    if isinstance(oid_value, tuple):
+                        oid_value = oid_value[0]
+                    oid_items.append((oid_to_bytes(oid), oid_value))
+            else:
+                continue
 
             # craft SNMP response
             response = craft_response(
