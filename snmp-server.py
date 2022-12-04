@@ -15,8 +15,12 @@ import string
 import struct
 import sys
 import types
-from collections import Iterable
 from contextlib import closing
+
+try:
+    from collections import Iterable
+except ImportError:
+    from collections.abc import Iterable
 
 try:
     from StringIO import StringIO
