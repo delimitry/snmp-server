@@ -229,9 +229,11 @@ def _read_int_len(stream, length, signed=False):
 
 
 def _write_int(value, strip_leading_zeros=True):
-    """Write int"""
+    """Write int while ensuring correct sign representation."""
     if abs(value) > 0xffffffffffffffff:
         raise Exception('Int value must be in [0..18446744073709551615]')
+    
+    # Determine the correct format specifier based on the value's magnitude and sign.
     if value < 0:
         if abs(value) <= 0x7f:
             result = struct.pack('>b', value)
@@ -242,11 +244,27 @@ def _write_int(value, strip_leading_zeros=True):
         elif abs(value) <= 0x7fffffffffffffff:
             result = struct.pack('>q', value)
         else:
-            raise Exception('Min signed int value')  # TODO: check this
+            raise Exception('Min signed int value')
     else:
+        # Always pack as the largest size to simplify leading zero handling.
         result = struct.pack('>Q', value)
-    # strip first null bytes, if all are null - leave one
-    result = result.lstrip(b'\x00') if strip_leading_zeros else result
+
+        # Check if the first relevant byte (ignoring leading zeros for now) would be misinterpreted as negative.
+        if not strip_leading_zeros or (result[0] == 0x00 and (result[1] & 0x80) != 0):
+            # If not stripping leading zeros, or if stripping them would cause a misinterpretation,
+            # leave the result as is. This branch might need revisiting based on specific needs.
+            pass
+        else:
+            # Here's the core of the adjustment: only strip leading zeros if it does not lead to misinterpretation.
+            # This means checking if the first byte would make it look negative and adjusting accordingly.
+            first_non_zero_byte = next((i for i, byte in enumerate(result) if byte != 0), len(result) - 1)
+            if result[first_non_zero_byte] & 0x80:
+                # If the first non-zero byte's MSB is set, prepend a 0x00 to keep it positive.
+                result = b'\x00' + result[first_non_zero_byte:]
+            else:
+                # Otherwise, strip all leading zeros except the last one, if all are zeros.
+                result = result[first_non_zero_byte:]
+
     return result or b'\x00'
 
 
