@@ -227,7 +227,6 @@ def _read_int_len(stream, length, signed=False):
         result = twos_complement(result, 8 * length)
     return result
 
-
 def _write_int(value, strip_leading_zeros=True):
     """Write int while ensuring correct sign representation."""
     if abs(value) > 0xffffffffffffffff:
@@ -266,7 +265,6 @@ def _write_int(value, strip_leading_zeros=True):
                 result = result[first_non_zero_byte:]
 
     return result or b'\x00'
-
 
 def _write_asn1_length(length):
     """Write ASN.1 length"""
@@ -839,39 +837,94 @@ def handle_set_request(oids, oid, type_and_value):
     error_status = ASN1_ERROR_STATUS_NO_ERROR
     error_index = 0
     value_type, value = type_and_value
+
+    res = None
     if value_type == 'INTEGER':
         enum_values = None
-        if isinstance(oids[oid], tuple) and len(oids[oid]) > 1:
+        if oid in oids and isinstance(oids[oid], tuple) and len(oids[oid]) > 1:
             enum_values = oids[oid][1]
-        oids[oid] = integer(value, enum=enum_values)
+        res = integer(value, enum=enum_values)
     elif value_type == 'STRING':
-        oids[oid] = octet_string(value if PY3 else value.encode('latin'))
+        res = octet_string(value if PY3 else value.encode('latin'))
     elif value_type == 'OID':
-        oids[oid] = object_identifier(value)
+        res = object_identifier(value)
     elif value_type == 'TIMETICKS':
-        oids[oid] = timeticks(value)
+        res = timeticks(value)
     elif value_type == 'IPADDRESS':
-        oids[oid] = ip_address(value)
+        res = ip_address(value)
     elif value_type == 'COUNTER32':
-        oids[oid] = counter32(value)
+        res = counter32(value)
     elif value_type == 'COUNTER64':
-        oids[oid] = counter64(value)
+        res = counter64(value)
     elif value_type == 'GAUGE32':
-        oids[oid] = gauge32(value)
+        res = gauge32(value)
     elif value_type == 'OPAQUE':
         if value[0] == 'FLOAT':
-            oids[oid] = real(value[1])
+            res = real(value[1])
         elif value[0] == 'DOUBLE':
-            oids[oid] = double(value[1])
+            res = double(value[1])
         elif value[0] == 'UINT64':
-            oids[oid] = uint64(value[1])
+            res = uint64(value[1])
         elif value[0] == 'INT64':
-            oids[oid] = int64(value[1])
+            res = int64(value[1])
         else:
             raise Exception('Unsupported type: {} ({})'.format(value_type, repr(value)))
-    oid_value = oids[oid]
+        
+    if res is None:
+        error_status = ASN1_ERROR_STATUS_WRONG_VALUE
+        error_index = 1
+        res = null()
+    else:
+        if oid in oids and isinstance(oids[oid], types.FunctionType):
+            oids[oid](oid, value)
+        else:
+            oids[oid] = res
+
+    oid_value = res
     return error_status, error_index, oid_value
 
+def handle_trap_request(oids, oid, type_and_value, details):
+    """Handle Trap Request"""
+    logger.info(type_and_value)
+    value_type, value = type_and_value
+
+    res = None
+    if value_type == 'INTEGER':
+        enum_values = None
+        if oid in oids and isinstance(oids[oid], tuple) and len(oids[oid]) > 1:
+            enum_values = oids[oid][1]
+        res = integer(value, enum=enum_values)
+    elif value_type == 'STRING':
+        res = octet_string(value if PY3 else value.encode('latin'))
+    elif value_type == 'OID':
+        res = object_identifier(value)
+    elif value_type == 'TIMETICKS':
+        res = timeticks(value)
+    elif value_type == 'IPADDRESS':
+        res = ip_address(value)
+    elif value_type == 'COUNTER32':
+        res = counter32(value)
+    elif value_type == 'COUNTER64':
+        res = counter64(value)
+    elif value_type == 'GAUGE32':
+        res = gauge32(value)
+    elif value_type == 'OPAQUE':
+        if value[0] == 'FLOAT':
+            res = real(value[1])
+        elif value[0] == 'DOUBLE':
+            res = double(value[1])
+        elif value[0] == 'UINT64':
+            res = uint64(value[1])
+        elif value[0] == 'INT64':
+            res = int64(value[1])
+        else:
+            raise Exception('Unsupported type: {} ({})'.format(value_type, repr(value)))
+        
+    if res is not None:
+        if oid in oids and isinstance(oids[oid], types.FunctionType):
+            oids[oid](oid, value, details)
+        else:
+            oids[oid] = res
 
 def craft_response(version, community, request_id, error_status, error_index, oid_items):
     """Craft SNMP response"""
@@ -980,18 +1033,19 @@ def snmp_server(host, port, oids):
                 oid = request_result[6][1]
                 type_and_value = request_result[7]
                 try:
-                    if isinstance(oids[oid], tuple) and len(oids[oid]) > 1:
+                    if oid in oids and isinstance(oids[oid], tuple) and len(oids[oid]) > 1:
                         enum_values = oids[oid][1]
                         new_value = type_and_value[1]
                         if isinstance(enum_values, Iterable) and new_value not in enum_values:
                             raise WrongValueError('Value {} is outside the range of enum values'.format(new_value))
+                    logger.debug('oid: %s, type_and_value: %s', oid, type_and_value)
                     error_status, error_index, oid_value = handle_set_request(oids, oid, type_and_value)
                 except WrongValueError as ex:
-                    logger.error(ex)
+                    logger.error(f"Wrong value error: {ex}")
                     error_status = ASN1_ERROR_STATUS_WRONG_VALUE
                     error_index = 0
                 except Exception as ex:
-                    logger.error(ex)
+                    logger.error(f"Unknown exception error: {ex}")
                     error_status = ASN1_ERROR_STATUS_BAD_VALUE
                     error_index = 0
                 # if oid value is a function - call it to get the value
@@ -1015,10 +1069,33 @@ def snmp_server(host, port, oids):
                     if isinstance(oid_value, tuple):
                         oid_value = oid_value[0]
                     oid_items.append((oid_to_bytes(oid), oid_value))
+            elif pdu_type == ASN1_TRAP_REQUEST_PDU:
+                if len(request_result) < 10:
+                    raise Exception('Invalid ASN.1 parsed request length for SNMP trap request!')
+                logger.debug('Trap request length %d', len(request_result))
+                agent_community = request_result[1][1]
+                enterprise_oid = request_result[3][1]
+                agent_addr = request_result[4][1]
+                trap_type = request_result[5][1]
+                specific_type = request_result[6][1]
+                uptime = request_result[7][1]
+                oid = request_result[8][1]
+                type_and_value = request_result[9]
+                handle_trap_request(oids, oid, type_and_value, {
+                    'agent_community': agent_community,
+                    'enterprise_oid': enterprise_oid,
+                    'agent_addr': agent_addr,
+                    'trap_type': trap_type,
+                    'specific_type': specific_type,
+                    'uptime': uptime,
+                })
+                continue # traps do not require a response
             else:
                 continue
 
             # craft SNMP response
+            logger.info('Crafting response')
+            logger.info(request_id)
             response = craft_response(
                 version, community, request_id, error_status, error_index, oid_items)
             logger.debug('Sending %d bytes of response', len(response))
@@ -1027,7 +1104,6 @@ def snmp_server(host, port, oids):
             except socket.error as ex:
                 logger.error('Failed to send %d bytes of response: %s', len(response), ex)
             logger.debug('')
-
 
 def main():
     """Main"""
