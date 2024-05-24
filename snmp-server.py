@@ -1104,3 +1104,48 @@ def snmp_server(host, port, oids):
             except socket.error as ex:
                 logger.error('Failed to send %d bytes of response: %s', len(response), ex)
             logger.debug('')
+
+def main():
+    """Main"""
+    parser = argparse.ArgumentParser(description='SNMP server')
+    parser.add_argument(
+        '-p', '--port', dest='port', type=int,
+        help='port (by default 161 - requires root privileges)', default=161, required=False)
+    parser.add_argument(
+        '-c', '--config', type=str,
+        help='OIDs config file', required=False)
+    parser.add_argument(
+        '-d', '--debug',
+        help='run in debug mode', action='store_true')
+    parser.add_argument(
+        '-v', '--version', action='version',
+        version='SNMP server v{}'.format(__version__))
+
+    args = parser.parse_args()
+
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+
+    # work as an echo server if no config is passed
+    oids = {
+        '*': lambda oid: octet_string(oid),
+    }
+    # read a config
+    config_filename = args.config
+    if config_filename:
+        try:
+            oids = parse_config(config_filename)
+        except ConfigError as ex:
+            logger.error(ex)
+            sys.exit(-1)
+
+    host = '0.0.0.0'
+    port = args.port
+    try:
+        snmp_server(host, port, oids)
+    except KeyboardInterrupt:
+        logger.debug('Interrupted by Ctrl+C')
+
+
+if __name__ == '__main__':
+    main()
