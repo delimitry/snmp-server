@@ -797,7 +797,7 @@ def handle_get_request(oids, oid):
     return error_status, error_index, oid_value
 
 
-def handle_get_next_request(oids, oid):
+def handle_get_next_request(oids, oid, limit_to_last_in_config=True):
     """Handle GetNextRequest"""
     error_status = ASN1_ERROR_STATUS_NO_ERROR
     error_index = 0
@@ -829,6 +829,11 @@ def handle_get_next_request(oids, oid):
         oid = get_next_oid(oid.rstrip('.0')) + '.0'
     # if wildcards are used in oid - replace them
     final_oid = replace_wildcards(oid)
+    # to prevent loop - check a new oid and if it is more than the last in config - stop 
+    if oids and limit_to_last_in_config:
+        last_oid_in_config = sorted(oids, key=functools.cmp_to_key(oid_cmp))[-1]
+        if oid_cmp(final_oid, last_oid_in_config) > 0:
+            oid_value = struct.pack('BB', ASN1_END_OF_MIB_VIEW, 0)
     return error_status, error_index, final_oid, oid_value
 
 
