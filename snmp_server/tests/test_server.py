@@ -2,8 +2,8 @@
 #-*- coding: utf8 -*-
 
 import unittest
-from pytest_snmpserver.snmp_server import *
-from pytest_snmpserver.snmp_server import (_parse_asn1_length, _parse_snmp_asn1, _read_byte,
+from snmp_server.snmp_server import *
+from snmp_server.snmp_server import (_parse_asn1_length, _parse_snmp_asn1, _read_byte,
                                            _read_int_len, _write_asn1_length, _write_int)
 
 try:
